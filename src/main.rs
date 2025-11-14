@@ -1,5 +1,6 @@
 mod hcp_grid;
 mod cvt;
+mod particle_sim;
 mod dxf_output;
 mod svg_output;
 
@@ -18,8 +19,10 @@ fn main() -> Result<()> {
         eprintln!("  --pitch <value>         Hole pitch in μm (default: 2.0)");
         eprintln!("  --diameter <value>      Hole diameter in μm (default: 1.0)");
         eprintln!("  --clearance <value>     Edge clearance in μm (default: pitch)");
-        eprintln!("  --iterations <value>    Max CVT iterations (default: 50)");
+        eprintln!("  --method <cvt|particle> Optimization method (default: cvt)");
+        eprintln!("  --iterations <value>    Max iterations (default: 50)");
         eprintln!("  --threshold <value>     Convergence threshold (default: 0.001)");
+        eprintln!("  --damping <value>       Particle damping factor (default: 0.5)");
         eprintln!("  --output <path>         Output DXF path (default: output.dxf)");
         eprintln!("  --svg <path>            Optional SVG visualization path");
         eprintln!("  --voronoi-svg <path>    Optional Voronoi diagram SVG path");
@@ -31,8 +34,10 @@ fn main() -> Result<()> {
     let mut pitch = 2.0;
     let mut hole_diameter = 1.0;
     let mut clearance: Option<f64> = None;  // None means use pitch as default
+    let mut method = "cvt".to_string();
     let mut max_iterations = 50;
     let mut convergence_threshold = 0.001;
+    let mut damping = 0.5;
     let mut output_path = "output.dxf".to_string();
     let mut svg_path: Option<String> = None;
     let mut voronoi_svg_path: Option<String> = None;
@@ -52,8 +57,16 @@ fn main() -> Result<()> {
                 clearance = Some(args[i + 1].parse()?);
                 i += 2;
             }
+            "--method" => {
+                method = args[i + 1].clone();
+                i += 2;
+            }
             "--iterations" => {
                 max_iterations = args[i + 1].parse()?;
+                i += 2;
+            }
+            "--damping" => {
+                damping = args[i + 1].parse()?;
                 i += 2;
             }
             "--threshold" => {
@@ -79,9 +92,14 @@ fn main() -> Result<()> {
         }
     }
 
+    let method_name = match method.as_str() {
+        "particle" => "Particle Physics Simulation",
+        _ => "Centroidal Voronoi Tessellation (CVT)",
+    };
+
     println!("╔════════════════════════════════════════════════════════╗");
     println!("║   Etch Hole Pattern Generator                          ║");
-    println!("║   Centroidal Voronoi Tessellation (CVT)                ║");
+    println!("║   {:<53}║", method_name);
     println!("╚════════════════════════════════════════════════════════╝");
     println!("\n📁 Input: {}", input_path);
     println!("📁 Output: {}", output_path);
@@ -92,11 +110,15 @@ fn main() -> Result<()> {
     let clearance = clearance.unwrap_or(pitch);
 
     println!("\n⚙️  Parameters:");
+    println!("   Method: {}", method);
     println!("   Pitch: {} μm", pitch);
     println!("   Hole diameter: {} μm", hole_diameter);
     println!("   Edge clearance: {} μm", clearance);
     println!("   Max iterations: {}", max_iterations);
     println!("   Convergence threshold: {}", convergence_threshold);
+    if method == "particle" {
+        println!("   Damping: {}", damping);
+    }
 
     // Step 1: Load DXF and extract polygons
     println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -130,26 +152,54 @@ fn main() -> Result<()> {
 
     println!("✓ Generated {} initial points", initial_points.len());
 
-    // Step 3: Compute CVT
+    // Step 3: Compute optimization (CVT or Particle)
     println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Step 3: Computing CVT (Lloyd's algorithm)");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    let (optimized_points, _metric_history) = match method.as_str() {
+        "particle" => {
+            println!("Step 3: Computing particle physics simulation");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    let (optimized_points, variance_history) = cvt::compute_cvt(
-        initial_points,
-        boundary,
-        max_iterations,
-        convergence_threshold,
-    )?;
+            let (points, energy_history) = particle_sim::compute_particle_distribution(
+                initial_points,
+                boundary,
+                pitch,
+                damping,
+                max_iterations,
+                convergence_threshold,
+            )?;
 
-    println!("✓ CVT optimization complete");
-    println!("   Final points: {}", optimized_points.len());
-    if !variance_history.is_empty() {
-        println!("   Initial variance: {:.6}", variance_history[0]);
-        println!("   Final variance: {:.6}", variance_history[variance_history.len() - 1]);
-        let improvement = (1.0 - variance_history[variance_history.len() - 1] / variance_history[0]) * 100.0;
-        println!("   Improvement: {:.2}%", improvement);
-    }
+            println!("✓ Particle simulation complete");
+            println!("   Final points: {}", points.len());
+            if !energy_history.is_empty() {
+                println!("   Initial kinetic energy: {:.6}", energy_history[0]);
+                println!("   Final kinetic energy: {:.6}", energy_history[energy_history.len() - 1]);
+            }
+
+            (points, energy_history)
+        }
+        _ => {
+            println!("Step 3: Computing CVT (Lloyd's algorithm)");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+            let (points, variance_history) = cvt::compute_cvt(
+                initial_points,
+                boundary,
+                max_iterations,
+                convergence_threshold,
+            )?;
+
+            println!("✓ CVT optimization complete");
+            println!("   Final points: {}", points.len());
+            if !variance_history.is_empty() {
+                println!("   Initial variance: {:.6}", variance_history[0]);
+                println!("   Final variance: {:.6}", variance_history[variance_history.len() - 1]);
+                let improvement = (1.0 - variance_history[variance_history.len() - 1] / variance_history[0]) * 100.0;
+                println!("   Improvement: {:.2}%", improvement);
+            }
+
+            (points, variance_history)
+        }
+    };
 
     // Step 4: Write DXF output
     println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
