@@ -1,11 +1,13 @@
 [package]
 name = "etch-hole-gen"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 dxf = "0.5"
 geo = "0.28"
 geo-types = "0.7"
 anyhow = "1.0"
+voronator = "0.2"
+svg = "0.14"
 

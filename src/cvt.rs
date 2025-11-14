@@ -1,0 +1,265 @@
+use geo::{Coord, Polygon, LineString};
+use geo::algorithm::contains::Contains;
+use voronator::delaunator::Point as DelaunatorPoint;
+use voronator::VoronoiDiagram;
+use anyhow::Result;
+
+/// Compute Centroidal Voronoi Tessellation using Lloyd's algorithm
+///
+/// # Arguments
+/// * `initial_points` - Starting point distribution (e.g., from HCP grid)
+/// * `boundary` - Polygon boundary to constrain the tessellation
+/// * `max_iterations` - Maximum number of Lloyd iterations
+/// * `convergence_threshold` - Stop when centroid movement is below this threshold
+///
+/// # Returns
+/// Optimized point positions and convergence metrics
+pub fn compute_cvt(
+    mut points: Vec<Coord<f64>>,
+    boundary: &Polygon<f64>,
+    max_iterations: usize,
+    convergence_threshold: f64,
+) -> Result<(Vec<Coord<f64>>, Vec<f64>)> {
+    println!("\n=== CVT Computation (Lloyd's Algorithm) ===");
+    println!("Initial points: {}", points.len());
+    println!("Max iterations: {}", max_iterations);
+    println!("Convergence threshold: {:.6}", convergence_threshold);
+
+    let mut variance_history = Vec::new();
+
+    for iter in 0..max_iterations {
+        // Convert points to voronator format
+        let voronoi_points: Vec<DelaunatorPoint> = points
+            .iter()
+            .map(|c| DelaunatorPoint { x: c.x, y: c.y })
+            .collect();
+
+        // Compute bounding box for Voronoi diagram
+        let min_pt = DelaunatorPoint {
+            x: points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+            y: points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+        };
+        let max_pt = DelaunatorPoint {
+            x: points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+            y: points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+        };
+
+        // Compute Voronoi diagram
+        let diagram = match VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
+            Some(d) => d,
+            None => {
+                eprintln!("Voronoi computation failed at iteration {}", iter);
+                break;
+            }
+        };
+
+        // For each point, compute the centroid of its Voronoi cell clipped to boundary
+        let mut new_points = Vec::new();
+        let mut total_movement = 0.0;
+        let mut cell_areas = Vec::new();
+
+        for (i, old_point) in points.iter().enumerate() {
+            // Get Voronoi cell for this point
+            let cell = get_voronoi_cell(&diagram, i, boundary);
+
+            // Compute centroid of the clipped cell
+            if let Some(centroid) = compute_polygon_centroid(&cell) {
+                // Ensure centroid is within boundary
+                if boundary.contains(&centroid) {
+                    let movement = distance(old_point, &centroid);
+                    total_movement += movement;
+                    new_points.push(centroid);
+
+                    // Track cell area for variance computation
+                    let area = polygon_area(&cell);
+                    cell_areas.push(area);
+                } else {
+                    // Keep original point if centroid is outside
+                    new_points.push(*old_point);
+                    let area = polygon_area(&cell);
+                    cell_areas.push(area);
+                }
+            } else {
+                // Keep original point if centroid computation fails
+                new_points.push(*old_point);
+            }
+        }
+
+        points = new_points;
+
+        // Compute variance of cell areas
+        let variance = compute_variance(&cell_areas);
+        variance_history.push(variance);
+
+        let avg_movement = total_movement / points.len() as f64;
+
+        if iter % 5 == 0 || iter == max_iterations - 1 {
+            println!(
+                "Iteration {}: avg movement = {:.6}, variance = {:.6}",
+                iter, avg_movement, variance
+            );
+        }
+
+        // Check convergence
+        if avg_movement < convergence_threshold {
+            println!(
+                "\nConverged after {} iterations (avg movement: {:.6})",
+                iter, avg_movement
+            );
+            break;
+        }
+    }
+
+    println!("Final points: {}", points.len());
+
+    Ok((points, variance_history))
+}
+
+/// Extract Voronoi cell for a specific site and clip to boundary
+fn get_voronoi_cell(
+    diagram: &VoronoiDiagram<DelaunatorPoint>,
+    site_index: usize,
+    _boundary: &Polygon<f64>,
+) -> Polygon<f64> {
+    // Get all cells and access the one we need
+    let all_cells = diagram.cells();
+
+    if site_index < all_cells.len() {
+        let cell = &all_cells[site_index];
+
+        // Convert voronator polygon to geo polygon
+        let mut coords: Vec<Coord<f64>> = cell.points()
+            .iter()
+            .map(|p| Coord { x: p.x, y: p.y })
+            .collect();
+
+        if !coords.is_empty() {
+            // Close the polygon
+            if let Some(&first) = coords.first() {
+                coords.push(first);
+            }
+
+            let cell_poly = Polygon::new(LineString::new(coords), vec![]);
+
+            // TODO: Implement proper polygon clipping to boundary
+            // For now, return the cell as-is
+            return cell_poly;
+        }
+    }
+
+    // Return empty polygon if cell not found
+    Polygon::new(LineString::new(vec![]), vec![])
+}
+
+/// Compute centroid of a polygon
+fn compute_polygon_centroid(polygon: &Polygon<f64>) -> Option<Coord<f64>> {
+    let coords: Vec<_> = polygon.exterior().coords().collect();
+
+    if coords.len() < 3 {
+        return None;
+    }
+
+    let mut cx = 0.0;
+    let mut cy = 0.0;
+    let mut area = 0.0;
+
+    // Use the formula for polygon centroid
+    for i in 0..coords.len() - 1 {
+        let x0 = coords[i].x;
+        let y0 = coords[i].y;
+        let x1 = coords[i + 1].x;
+        let y1 = coords[i + 1].y;
+
+        let cross = x0 * y1 - x1 * y0;
+        area += cross;
+        cx += (x0 + x1) * cross;
+        cy += (y0 + y1) * cross;
+    }
+
+    area *= 0.5;
+
+    if area.abs() < 1e-10 {
+        return None;
+    }
+
+    cx /= 6.0 * area;
+    cy /= 6.0 * area;
+
+    Some(Coord { x: cx, y: cy })
+}
+
+/// Compute area of a polygon
+fn polygon_area(polygon: &Polygon<f64>) -> f64 {
+    let coords: Vec<_> = polygon.exterior().coords().collect();
+
+    if coords.len() < 3 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+
+    for i in 0..coords.len() - 1 {
+        area += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
+    }
+
+    (area * 0.5).abs()
+}
+
+/// Compute variance of a set of values
+fn compute_variance(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64;
+
+    variance
+}
+
+/// Euclidean distance between two points
+fn distance(p1: &Coord<f64>, p2: &Coord<f64>) -> f64 {
+    ((p2.x - p1.x).powi(2) + (p2.y - p1.y).powi(2)).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_polygon_centroid() {
+        // Unit square centered at origin
+        let square = Polygon::new(
+            LineString::from(vec![
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (1.0, 1.0),
+                (-1.0, 1.0),
+                (-1.0, -1.0),
+            ]),
+            vec![],
+        );
+
+        let centroid = compute_polygon_centroid(&square).unwrap();
+        assert!((centroid.x).abs() < 1e-10);
+        assert!((centroid.y).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_polygon_area() {
+        // Unit square
+        let square = Polygon::new(
+            LineString::from(vec![
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 1.0),
+                (0.0, 1.0),
+                (0.0, 0.0),
+            ]),
+            vec![],
+        );
+
+        let area = polygon_area(&square);
+        assert!((area - 1.0).abs() < 1e-10);
+    }
+}
