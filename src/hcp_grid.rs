@@ -1,5 +1,6 @@
-use geo::{Coord, Polygon};
+use geo::{Coord, Polygon, Point, Line};
 use geo::algorithm::contains::Contains;
+use geo::algorithm::euclidean_distance::EuclideanDistance;
 
 /// Generate hexagonal close-packed (HCP) grid points within a polygon
 ///
@@ -52,9 +53,9 @@ pub fn generate_hcp_grid(
             if polygon.contains(&coord) {
                 // Check clearance from boundary if needed
                 if clearance > 0.0 {
-                    // For now, simplified: just check if point is inside
-                    // More sophisticated: compute distance to nearest edge
-                    points.push(coord);
+                    if distance_to_boundary(&coord, polygon) >= clearance {
+                        points.push(coord);
+                    }
                 } else {
                     points.push(coord);
                 }
@@ -70,6 +71,26 @@ pub fn generate_hcp_grid(
     println!("Generated {} HCP grid points", points.len());
 
     points
+}
+
+/// Compute minimum distance from a point to the polygon boundary
+fn distance_to_boundary(point: &Coord<f64>, polygon: &Polygon<f64>) -> f64 {
+    let pt = Point::from(*point);
+    let exterior = polygon.exterior();
+
+    let mut min_dist = f64::INFINITY;
+
+    // Check distance to each edge of the polygon
+    let coords: Vec<_> = exterior.coords().collect();
+    for i in 0..coords.len() - 1 {
+        let line = Line::new(*coords[i], *coords[i + 1]);
+        let dist = pt.euclidean_distance(&line);
+        if dist < min_dist {
+            min_dist = dist;
+        }
+    }
+
+    min_dist
 }
 
 #[cfg(test)]

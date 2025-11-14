@@ -17,6 +17,7 @@ fn main() -> Result<()> {
         eprintln!("\nOptions:");
         eprintln!("  --pitch <value>         Hole pitch in μm (default: 2.0)");
         eprintln!("  --diameter <value>      Hole diameter in μm (default: 1.0)");
+        eprintln!("  --clearance <value>     Edge clearance in μm (default: pitch)");
         eprintln!("  --iterations <value>    Max CVT iterations (default: 50)");
         eprintln!("  --threshold <value>     Convergence threshold (default: 0.001)");
         eprintln!("  --output <path>         Output DXF path (default: output.dxf)");
@@ -28,6 +29,7 @@ fn main() -> Result<()> {
     let input_path = &args[1];
     let mut pitch = 2.0;
     let mut hole_diameter = 1.0;
+    let mut clearance: Option<f64> = None;  // None means use pitch as default
     let mut max_iterations = 50;
     let mut convergence_threshold = 0.001;
     let mut output_path = "output.dxf".to_string();
@@ -42,6 +44,10 @@ fn main() -> Result<()> {
             }
             "--diameter" => {
                 hole_diameter = args[i + 1].parse()?;
+                i += 2;
+            }
+            "--clearance" => {
+                clearance = Some(args[i + 1].parse()?);
                 i += 2;
             }
             "--iterations" => {
@@ -76,9 +82,13 @@ fn main() -> Result<()> {
     if let Some(ref svg) = svg_path {
         println!("📁 SVG: {}", svg);
     }
+    // Set clearance to pitch if not specified
+    let clearance = clearance.unwrap_or(pitch);
+
     println!("\n⚙️  Parameters:");
     println!("   Pitch: {} μm", pitch);
     println!("   Hole diameter: {} μm", hole_diameter);
+    println!("   Edge clearance: {} μm", clearance);
     println!("   Max iterations: {}", max_iterations);
     println!("   Convergence threshold: {}", convergence_threshold);
 
@@ -106,7 +116,7 @@ fn main() -> Result<()> {
     println!("Step 2: Generating HCP grid");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    let initial_points = hcp_grid::generate_hcp_grid(boundary, pitch, 0.0);
+    let initial_points = hcp_grid::generate_hcp_grid(boundary, pitch, clearance);
 
     if initial_points.is_empty() {
         anyhow::bail!("Failed to generate initial HCP grid!");

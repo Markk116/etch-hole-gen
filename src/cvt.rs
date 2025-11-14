@@ -26,6 +26,7 @@ pub fn compute_cvt(
     println!("Convergence threshold: {:.6}", convergence_threshold);
 
     let mut variance_history = Vec::new();
+    let mut elongation_history = Vec::new();
 
     for iter in 0..max_iterations {
         // Convert points to voronator format
@@ -57,6 +58,7 @@ pub fn compute_cvt(
         let mut new_points = Vec::new();
         let mut total_movement = 0.0;
         let mut cell_areas = Vec::new();
+        let mut cell_elongations = Vec::new();
 
         for (i, old_point) in points.iter().enumerate() {
             // Get Voronoi cell for this point
@@ -73,15 +75,21 @@ pub fn compute_cvt(
                     // Track cell area for variance computation
                     let area = polygon_area(&cell);
                     cell_areas.push(area);
+
+                    // Track cell elongation (measure of circularity)
+                    let elongation = compute_cell_elongation(&cell, &centroid);
+                    cell_elongations.push(elongation);
                 } else {
                     // Keep original point if centroid is outside
                     new_points.push(*old_point);
                     let area = polygon_area(&cell);
                     cell_areas.push(area);
+                    cell_elongations.push(1.0);
                 }
             } else {
                 // Keep original point if centroid computation fails
                 new_points.push(*old_point);
+                cell_elongations.push(1.0);
             }
         }
 
@@ -91,12 +99,20 @@ pub fn compute_cvt(
         let variance = compute_variance(&cell_areas);
         variance_history.push(variance);
 
+        // Compute average elongation (1.0 = circular, higher = more elongated)
+        let avg_elongation = if !cell_elongations.is_empty() {
+            cell_elongations.iter().sum::<f64>() / cell_elongations.len() as f64
+        } else {
+            1.0
+        };
+        elongation_history.push(avg_elongation);
+
         let avg_movement = total_movement / points.len() as f64;
 
         if iter % 5 == 0 || iter == max_iterations - 1 {
             println!(
-                "Iteration {}: avg movement = {:.6}, variance = {:.6}",
-                iter, avg_movement, variance
+                "Iteration {}: avg movement = {:.6}, variance = {:.6}, elongation = {:.3}",
+                iter, avg_movement, variance, avg_elongation
             );
         }
 
@@ -108,6 +124,55 @@ pub fn compute_cvt(
             );
             break;
         }
+    }
+
+    // Final step: Snap points to exact centroids of their Voronoi cells
+    println!("\n=== Final Centroid Positioning ===");
+    let voronoi_points: Vec<DelaunatorPoint> = points
+        .iter()
+        .map(|c| DelaunatorPoint { x: c.x, y: c.y })
+        .collect();
+
+    let min_pt = DelaunatorPoint {
+        x: points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+        y: points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+    };
+    let max_pt = DelaunatorPoint {
+        x: points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+        y: points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+    };
+
+    if let Some(diagram) = VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
+        let mut final_points = Vec::new();
+        let mut final_elongations = Vec::new();
+
+        for (i, _) in points.iter().enumerate() {
+            let cell = get_voronoi_cell(&diagram, i, boundary);
+
+            if let Some(centroid) = compute_polygon_centroid(&cell) {
+                if boundary.contains(&centroid) {
+                    final_points.push(centroid);
+                    let elongation = compute_cell_elongation(&cell, &centroid);
+                    final_elongations.push(elongation);
+                } else {
+                    final_points.push(points[i]);
+                    final_elongations.push(1.0);
+                }
+            } else {
+                final_points.push(points[i]);
+                final_elongations.push(1.0);
+            }
+        }
+
+        points = final_points;
+
+        let avg_final_elongation = if !final_elongations.is_empty() {
+            final_elongations.iter().sum::<f64>() / final_elongations.len() as f64
+        } else {
+            1.0
+        };
+
+        println!("Final average elongation: {:.3}", avg_final_elongation);
     }
 
     println!("Final points: {}", points.len());
@@ -215,6 +280,36 @@ fn compute_variance(values: &[f64]) -> f64 {
     let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64;
 
     variance
+}
+
+/// Compute cell elongation (measure of circularity)
+///
+/// Elongation is the ratio of max distance to min distance from centroid to cell vertices.
+/// - 1.0 = perfect circle (all vertices equidistant)
+/// - >1.0 = elongated (higher = more elongated)
+fn compute_cell_elongation(cell: &Polygon<f64>, centroid: &Coord<f64>) -> f64 {
+    let coords: Vec<_> = cell.exterior().coords().collect();
+
+    if coords.len() < 3 {
+        return 1.0;
+    }
+
+    let mut min_dist = f64::INFINITY;
+    let mut max_dist = 0.0_f64;
+
+    for coord in coords.iter() {
+        let dist = distance(centroid, coord);
+        if dist > 1e-10 {  // Avoid zero distances
+            min_dist = min_dist.min(dist);
+            max_dist = max_dist.max(dist);
+        }
+    }
+
+    if min_dist < 1e-10 || min_dist == f64::INFINITY {
+        return 1.0;
+    }
+
+    max_dist / min_dist
 }
 
 /// Euclidean distance between two points
