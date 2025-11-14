@@ -198,6 +198,24 @@ fn extract_polygons(drawing: &Drawing) -> Result<Vec<Polygon<f64>>> {
                     open_polylines.push(coords);
                 }
             }
+            EntityType::Spline(spline) => {
+                println!("Found SPLINE with {} fit points, {} control points",
+                         spline.fit_points.len(), spline.control_points.len());
+
+                // Use fit points if available, otherwise use control points
+                let points = if !spline.fit_points.is_empty() {
+                    &spline.fit_points
+                } else {
+                    &spline.control_points
+                };
+
+                if points.len() >= 2 {
+                    let coords: Vec<Coord<f64>> = points.iter()
+                        .map(|p| Coord { x: p.x, y: p.y })
+                        .collect();
+                    open_polylines.push(coords);
+                }
+            }
             EntityType::Polyline(polyline) => {
                 let is_closed = (polyline.flags & 1) != 0;
                 println!("Found POLYLINE, closed: {}", is_closed);
@@ -214,7 +232,10 @@ fn extract_polygons(drawing: &Drawing) -> Result<Vec<Polygon<f64>>> {
                 println!("Found ARC at ({:.3}, {:.3}) with radius {:.3}",
                          arc.center.x, arc.center.y, arc.radius);
             }
-            _ => {}
+            other => {
+                // Log any other entity types we encounter
+                println!("Found other entity type: {:?}", std::mem::discriminant(other));
+            }
         }
     }
 
