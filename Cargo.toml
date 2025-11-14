@@ -10,4 +10,5 @@ geo-types = "0.7"
 anyhow = "1.0"
 voronator = "0.2"
 svg = "0.14"
+geo-clipper = "0.8"
 

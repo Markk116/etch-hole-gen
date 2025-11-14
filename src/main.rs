@@ -22,6 +22,7 @@ fn main() -> Result<()> {
         eprintln!("  --threshold <value>     Convergence threshold (default: 0.001)");
         eprintln!("  --output <path>         Output DXF path (default: output.dxf)");
         eprintln!("  --svg <path>            Optional SVG visualization path");
+        eprintln!("  --voronoi-svg <path>    Optional Voronoi diagram SVG path");
         std::process::exit(1);
     }
 
@@ -34,6 +35,7 @@ fn main() -> Result<()> {
     let mut convergence_threshold = 0.001;
     let mut output_path = "output.dxf".to_string();
     let mut svg_path: Option<String> = None;
+    let mut voronoi_svg_path: Option<String> = None;
 
     let mut i = 2;
     while i < args.len() {
@@ -64,6 +66,10 @@ fn main() -> Result<()> {
             }
             "--svg" => {
                 svg_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--voronoi-svg" => {
+                voronoi_svg_path = Some(args[i + 1].clone());
                 i += 2;
             }
             _ => {
@@ -174,6 +180,22 @@ fn main() -> Result<()> {
         )?;
 
         println!("✓ SVG file written successfully");
+    }
+
+    // Step 6: Optional Voronoi diagram SVG export
+    if let Some(voronoi_svg_path) = voronoi_svg_path {
+        println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("Step 6: Writing Voronoi diagram SVG");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        svg_output::write_voronoi_svg(
+            &voronoi_svg_path,
+            boundary,
+            &optimized_points,
+            10.0, // 10 pixels per micrometer
+        )?;
+
+        println!("✓ Voronoi SVG file written successfully");
     }
 
     println!("\n╔════════════════════════════════════════════════════════╗");

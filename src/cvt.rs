@@ -1,5 +1,7 @@
-use geo::{Coord, Polygon, LineString};
+use geo::{Coord, Polygon, LineString, MultiPolygon};
 use geo::algorithm::contains::Contains;
+use geo::algorithm::intersects::Intersects;
+use geo_clipper::Clipper;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 use anyhow::Result;
@@ -184,7 +186,7 @@ pub fn compute_cvt(
 fn get_voronoi_cell(
     diagram: &VoronoiDiagram<DelaunatorPoint>,
     site_index: usize,
-    _boundary: &Polygon<f64>,
+    boundary: &Polygon<f64>,
 ) -> Polygon<f64> {
     // Get all cells and access the one we need
     let all_cells = diagram.cells();
@@ -206,14 +208,39 @@ fn get_voronoi_cell(
 
             let cell_poly = Polygon::new(LineString::new(coords), vec![]);
 
-            // TODO: Implement proper polygon clipping to boundary
-            // For now, return the cell as-is
-            return cell_poly;
+            // Clip the Voronoi cell to the boundary polygon
+            return clip_polygon_to_boundary(&cell_poly, boundary);
         }
     }
 
     // Return empty polygon if cell not found
     Polygon::new(LineString::new(vec![]), vec![])
+}
+
+/// Clip a polygon to the boundary using intersection
+fn clip_polygon_to_boundary(poly: &Polygon<f64>, boundary: &Polygon<f64>) -> Polygon<f64> {
+    // Quick check: if poly doesn't intersect boundary at all, return empty
+    if !poly.intersects(boundary) {
+        return Polygon::new(LineString::new(vec![]), vec![]);
+    }
+
+    // Use geo-clipper to compute intersection
+    let result = poly.intersection(boundary, 1.0);
+
+    // Extract the first polygon from the result (there should typically be only one)
+    match result {
+        MultiPolygon(polys) if !polys.is_empty() => {
+            // Return the largest polygon if there are multiple
+            polys.into_iter()
+                .max_by(|a, b| {
+                    let area_a = polygon_area(a);
+                    let area_b = polygon_area(b);
+                    area_a.partial_cmp(&area_b).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or_else(|| Polygon::new(LineString::new(vec![]), vec![]))
+        }
+        _ => Polygon::new(LineString::new(vec![]), vec![]),
+    }
 }
 
 /// Compute centroid of a polygon
