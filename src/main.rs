@@ -240,48 +240,123 @@ fn assemble_open_polylines(segments: Vec<Vec<Coord<f64>>>) -> Result<Vec<Polygon
         return Ok(vec![]);
     }
 
-    let mut all_points: Vec<Coord<f64>> = Vec::new();
-    for seg in segments {
-        all_points.extend(seg);
-    }
+    println!("\n=== Nearest-Neighbor Chain Assembly ===");
 
-    println!("\nCollected {} total points from segments", all_points.len());
+    // Track which segments we've used
+    let mut remaining_segments: Vec<Vec<Coord<f64>>> = segments;
 
-    let mut chain = Vec::new();
-    let mut used = vec![false; all_points.len()];
+    let mut polygons = Vec::new();
 
-    chain.push(all_points[0]);
-    used[0] = true;
+    while !remaining_segments.is_empty() {
+        // Start a new chain with the first remaining segment
+        let mut chain = remaining_segments.remove(0);
 
-    while chain.len() < all_points.len() {
-        let current = chain.last().unwrap();
-        let mut best_idx = None;
-        let mut best_dist = f64::INFINITY;
+        println!("Starting new chain with {} points", chain.len());
 
-        for (i, point) in all_points.iter().enumerate() {
-            if !used[i] {
-                let dist = distance(current, point);
-                if dist < best_dist {
-                    best_dist = dist;
+        // Keep connecting nearest segments until none are left
+        while !remaining_segments.is_empty() {
+            let chain_start = *chain.first().unwrap();
+            let chain_end = *chain.last().unwrap();
+
+            // Find the nearest segment endpoint to either end of our chain
+            let mut best_idx = None;
+            let mut best_dist = f64::INFINITY;
+            let mut best_config = 0; // 1=append_fwd, 2=append_rev, 3=prepend_fwd, 4=prepend_rev
+
+            for (i, seg) in remaining_segments.iter().enumerate() {
+                let seg_start = *seg.first().unwrap();
+                let seg_end = *seg.last().unwrap();
+
+                // Check all 4 possible connections and pick the closest
+                let d1 = distance(&chain_end, &seg_start); // append forward
+                let d2 = distance(&chain_end, &seg_end);   // append reversed
+                let d3 = distance(&seg_end, &chain_start); // prepend forward
+                let d4 = distance(&seg_start, &chain_start); // prepend reversed
+
+                if d1 < best_dist {
+                    best_dist = d1;
                     best_idx = Some(i);
+                    best_config = 1;
                 }
+                if d2 < best_dist {
+                    best_dist = d2;
+                    best_idx = Some(i);
+                    best_config = 2;
+                }
+                if d3 < best_dist {
+                    best_dist = d3;
+                    best_idx = Some(i);
+                    best_config = 3;
+                }
+                if d4 < best_dist {
+                    best_dist = d4;
+                    best_idx = Some(i);
+                    best_config = 4;
+                }
+            }
+
+            // Connect the best match
+            if let Some(idx) = best_idx {
+                let seg = remaining_segments.remove(idx);
+
+                match best_config {
+                    1 => {
+                        // Append forward
+                        println!("  Connecting segment {} to end (forward), distance: {:.6}", idx, best_dist);
+                        chain.extend(&seg[1..]);
+                    }
+                    2 => {
+                        // Append reversed
+                        println!("  Connecting segment {} to end (reversed), distance: {:.6}", idx, best_dist);
+                        let reversed: Vec<_> = seg.into_iter().rev().collect();
+                        chain.extend(&reversed[1..]);
+                    }
+                    3 => {
+                        // Prepend forward
+                        println!("  Connecting segment {} to start (forward), distance: {:.6}", idx, best_dist);
+                        let mut new_chain = seg;
+                        new_chain.extend(&chain[1..]);
+                        chain = new_chain;
+                    }
+                    4 => {
+                        // Prepend reversed
+                        println!("  Connecting segment {} to start (reversed), distance: {:.6}", idx, best_dist);
+                        let mut reversed: Vec<_> = seg.into_iter().rev().collect();
+                        reversed.extend(&chain[1..]);
+                        chain = reversed;
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                break;
             }
         }
 
-        if let Some(idx) = best_idx {
-            chain.push(all_points[idx]);
-            used[idx] = true;
+        println!("Chain complete with {} points", chain.len());
+
+        // Check if chain is closed
+        let chain_start = *chain.first().unwrap();
+        let chain_end = *chain.last().unwrap();
+        let closure_dist = distance(&chain_start, &chain_end);
+
+        println!("  Start: ({:.6}, {:.6})", chain_start.x, chain_start.y);
+        println!("  End:   ({:.6}, {:.6})", chain_end.x, chain_end.y);
+        println!("  Closure distance: {:.6}", closure_dist);
+
+        if closure_dist < 1e-3 {
+            println!("  ✓ Chain is closed");
         } else {
-            break;
+            println!("  ⚠ Chain has gap (this may cause issues)");
         }
+
+        let line_string = LineString::new(chain);
+        let polygon = Polygon::new(line_string, vec![]);
+        polygons.push(polygon);
     }
 
-    println!("Built chain with {} points", chain.len());
+    println!("Assembled {} polygon(s)", polygons.len());
 
-    let line_string = LineString::new(chain);
-    let polygon = Polygon::new(line_string, vec![]);
-
-    Ok(vec![polygon])
+    Ok(polygons)
 }
 
 fn distance(p1: &Coord<f64>, p2: &Coord<f64>) -> f64 {
