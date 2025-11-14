@@ -66,6 +66,13 @@ pub fn compute_cvt(
             // Get Voronoi cell for this point
             let cell = get_voronoi_cell(&diagram, i, boundary);
 
+            // Debug: check cell size
+            let cell_area = polygon_area(&cell);
+            if iter == 0 && i < 5 {
+                println!("  Cell {}: area = {:.6}, vertices = {}",
+                         i, cell_area, cell.exterior().coords().count());
+            }
+
             // Compute centroid of the clipped cell
             if let Some(centroid) = compute_polygon_centroid(&cell) {
                 // Ensure centroid is within boundary
@@ -225,7 +232,10 @@ fn clip_polygon_to_boundary(poly: &Polygon<f64>, boundary: &Polygon<f64>) -> Pol
     }
 
     // Use geo-clipper to compute intersection
-    let result = poly.intersection(boundary, 1.0);
+    // Scale factor: clipper works with integer coordinates, so we scale up
+    // For mm-scale coordinates (0-4mm), use larger scale factor
+    let scale_factor = 1000.0; // 1000x scale for better precision
+    let result = poly.intersection(boundary, scale_factor);
 
     // Extract the first polygon from the result (there should typically be only one)
     match result {
@@ -239,7 +249,10 @@ fn clip_polygon_to_boundary(poly: &Polygon<f64>, boundary: &Polygon<f64>) -> Pol
                 })
                 .unwrap_or_else(|| Polygon::new(LineString::new(vec![]), vec![]))
         }
-        _ => Polygon::new(LineString::new(vec![]), vec![]),
+        _ => {
+            // Clipping failed - return unclipped cell as fallback
+            poly.clone()
+        }
     }
 }
 
