@@ -66,13 +66,6 @@ pub fn compute_cvt(
             // Get Voronoi cell for this point
             let cell = get_voronoi_cell(&diagram, i, boundary);
 
-            // Debug: check cell size
-            let cell_area = polygon_area(&cell);
-            if iter == 0 && i < 5 {
-                println!("  Cell {}: area = {:.6}, vertices = {}",
-                         i, cell_area, cell.exterior().coords().count());
-            }
-
             // Compute centroid of the clipped cell
             if let Some(centroid) = compute_polygon_centroid(&cell) {
                 // Ensure centroid is within boundary
