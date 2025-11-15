@@ -1,6 +1,7 @@
 use geo::{Coord, Polygon, LineString};
 use geo::algorithm::contains::Contains;
 use anyhow::Result;
+use crate::svg_output;
 
 /// Compute particle-based distribution using repulsive forces
 ///
@@ -11,6 +12,7 @@ use anyhow::Result;
 /// * `damping` - Damping factor for velocity (0.0 = no damping, 1.0 = full damping)
 /// * `max_iterations` - Maximum number of simulation steps
 /// * `convergence_threshold` - Stop when average movement is below this threshold
+/// * `debug_svg_prefix` - Optional prefix for debug SVG output at each iteration
 ///
 /// # Returns
 /// Optimized point positions and kinetic energy history
@@ -21,6 +23,7 @@ pub fn compute_particle_distribution(
     damping: f64,
     max_iterations: usize,
     convergence_threshold: f64,
+    debug_svg_prefix: Option<&str>,
 ) -> Result<(Vec<Coord<f64>>, Vec<f64>)> {
     println!("\n=== Particle Physics Simulation ===");
     println!("Initial points: {}", points.len());
@@ -113,6 +116,14 @@ pub fn compute_particle_distribution(
                 "Iteration {}: avg movement = {:.6}, kinetic energy = {:.6}",
                 iter, avg_movement, total_kinetic_energy
             );
+        }
+
+        // Output debug SVG if requested
+        if let Some(prefix) = debug_svg_prefix {
+            let debug_path = format!("{}_{:04}.svg", prefix, iter);
+            if let Err(e) = svg_output::write_voronoi_svg(&debug_path, boundary, &points, 10.0) {
+                eprintln!("Warning: Failed to write debug SVG {}: {}", debug_path, e);
+            }
         }
 
         // Check convergence

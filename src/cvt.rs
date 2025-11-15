@@ -5,6 +5,7 @@ use geo_clipper::Clipper;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 use anyhow::Result;
+use crate::svg_output;
 
 /// Compute Centroidal Voronoi Tessellation using Lloyd's algorithm
 ///
@@ -13,6 +14,7 @@ use anyhow::Result;
 /// * `boundary` - Polygon boundary to constrain the tessellation
 /// * `max_iterations` - Maximum number of Lloyd iterations
 /// * `convergence_threshold` - Stop when centroid movement is below this threshold
+/// * `debug_svg_prefix` - Optional prefix for debug SVG output at each iteration
 ///
 /// # Returns
 /// Optimized point positions and convergence metrics
@@ -21,6 +23,7 @@ pub fn compute_cvt(
     boundary: &Polygon<f64>,
     max_iterations: usize,
     convergence_threshold: f64,
+    debug_svg_prefix: Option<&str>,
 ) -> Result<(Vec<Coord<f64>>, Vec<f64>)> {
     println!("\n=== CVT Computation (Lloyd's Algorithm) ===");
     println!("Initial points: {}", points.len());
@@ -116,6 +119,14 @@ pub fn compute_cvt(
                 "Iteration {}: avg movement = {:.6}, variance = {:.6}, elongation = {:.3}",
                 iter, avg_movement, variance, avg_elongation
             );
+        }
+
+        // Output debug SVG if requested
+        if let Some(prefix) = debug_svg_prefix {
+            let debug_path = format!("{}_{:04}.svg", prefix, iter);
+            if let Err(e) = svg_output::write_voronoi_svg(&debug_path, boundary, &points, 10.0) {
+                eprintln!("Warning: Failed to write debug SVG {}: {}", debug_path, e);
+            }
         }
 
         // Check convergence

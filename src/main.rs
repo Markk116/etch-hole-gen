@@ -26,6 +26,7 @@ fn main() -> Result<()> {
         eprintln!("  --output <path>         Output DXF path (default: output.dxf)");
         eprintln!("  --svg <path>            Optional SVG visualization path");
         eprintln!("  --voronoi-svg <path>    Optional Voronoi diagram SVG path");
+        eprintln!("  --debug-svg <prefix>    Output SVG at each iteration (prefix_NNNN.svg)");
         std::process::exit(1);
     }
 
@@ -41,6 +42,7 @@ fn main() -> Result<()> {
     let mut output_path = "output.dxf".to_string();
     let mut svg_path: Option<String> = None;
     let mut voronoi_svg_path: Option<String> = None;
+    let mut debug_svg_prefix: Option<String> = None;
 
     let mut i = 2;
     while i < args.len() {
@@ -85,6 +87,10 @@ fn main() -> Result<()> {
                 voronoi_svg_path = Some(args[i + 1].clone());
                 i += 2;
             }
+            "--debug-svg" => {
+                debug_svg_prefix = Some(args[i + 1].clone());
+                i += 2;
+            }
             _ => {
                 eprintln!("Unknown option: {}", args[i]);
                 i += 1;
@@ -118,6 +124,9 @@ fn main() -> Result<()> {
     println!("   Convergence threshold: {}", convergence_threshold);
     if method == "particle" {
         println!("   Damping: {}", damping);
+    }
+    if let Some(ref prefix) = debug_svg_prefix {
+        println!("   Debug SVG: {}*.svg (output at each iteration)", prefix);
     }
 
     // Step 1: Load DXF and extract polygons
@@ -166,6 +175,7 @@ fn main() -> Result<()> {
                 damping,
                 max_iterations,
                 convergence_threshold,
+                debug_svg_prefix.as_deref(),
             )?;
 
             println!("✓ Particle simulation complete");
@@ -186,6 +196,7 @@ fn main() -> Result<()> {
                 boundary,
                 max_iterations,
                 convergence_threshold,
+                debug_svg_prefix.as_deref(),
             )?;
 
             println!("✓ CVT optimization complete");
