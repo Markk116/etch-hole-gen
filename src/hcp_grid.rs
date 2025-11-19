@@ -1,6 +1,7 @@
 use geo::{Coord, Polygon, Point, Line};
 use geo::algorithm::contains::Contains;
 use geo::algorithm::euclidean_distance::EuclideanDistance;
+use rayon::prelude::*;
 
 /// Generate hexagonal close-packed (HCP) grid points within a polygon
 ///
@@ -10,12 +11,10 @@ pub fn generate_hcp_grid(
     pitch: f64,
     clearance: f64,
 ) -> Vec<Coord<f64>> {
-    let mut points = Vec::new();
-
     // Get bounding box
     let coords: Vec<_> = polygon.exterior().coords().collect();
     if coords.is_empty() {
-        return points;
+        return Vec::new();
     }
 
     let min_x = coords.iter().map(|c| c.x).fold(f64::INFINITY, f64::min);
@@ -27,35 +26,36 @@ pub fn generate_hcp_grid(
     let dx = pitch;
     let dy = pitch * (3.0_f64.sqrt() / 2.0);
 
-    // Generate grid
-    let mut row = 0;
-    let mut y = min_y;
+    // Generate all candidate positions
+    let num_rows = ((max_y - min_y) / dy).ceil() as usize + 1;
+    let num_cols = ((max_x - min_x) / dx).ceil() as usize + 1;
 
-    while y <= max_y {
-        let x_offset = if row % 2 == 0 { 0.0 } else { dx / 2.0 };
-        let mut x = min_x + x_offset;
+    let candidates: Vec<Coord<f64>> = (0..num_rows)
+        .flat_map(|row| {
+            let y = min_y + (row as f64) * dy;
+            let x_offset = if row % 2 == 0 { 0.0 } else { dx / 2.0 };
 
-        while x <= max_x {
-            let coord = Coord { x, y };
+            (0..num_cols).map(move |col| {
+                let x = min_x + x_offset + (col as f64) * dx;
+                Coord { x, y }
+            })
+        })
+        .collect();
 
-            if polygon.contains(&coord) {
-                if clearance > 0.0 {
-                    if distance_to_boundary(&coord, polygon) >= clearance {
-                        points.push(coord);
-                    }
-                } else {
-                    points.push(coord);
-                }
+    // Filter in parallel
+    candidates
+        .into_par_iter()
+        .filter(|coord| {
+            if !polygon.contains(coord) {
+                return false;
             }
-
-            x += dx;
-        }
-
-        y += dy;
-        row += 1;
-    }
-
-    points
+            if clearance > 0.0 {
+                distance_to_boundary(coord, polygon) >= clearance
+            } else {
+                true
+            }
+        })
+        .collect()
 }
 
 /// Compute minimum distance from a point to the polygon boundary

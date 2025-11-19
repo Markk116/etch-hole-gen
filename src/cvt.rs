@@ -30,6 +30,13 @@ pub fn compute_cvt(
     let mut final_elongation = 1.0;
     let mut iterations_run = 0;
 
+    // Output initial state before optimization
+    if let Some(prefix) = debug_svg_prefix {
+        let debug_path = format!("{}_init.svg", prefix);
+        let scale = 1e6;
+        let _ = svg_output::write_voronoi_svg(&debug_path, boundary, &points, scale);
+    }
+
     for iter in 0..max_iterations {
         iterations_run = iter + 1;
 
