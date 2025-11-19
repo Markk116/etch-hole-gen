@@ -3,24 +3,19 @@ use dxf::entities::*;
 use dxf::{Drawing, LwPolylineVertex};
 use geo::{Coord, Polygon};
 
+/// Meters to millimeters conversion
+const M_TO_MM: f64 = 1e3;
+
 /// Write optimized hole pattern to DXF file
 ///
-/// # Arguments
-/// * `output_path` - Path to output DXF file
-/// * `boundary` - Original boundary polygon
-/// * `hole_centers` - Centers of holes from CVT optimization
-/// * `hole_diameter` - Diameter of each hole (in micrometers)
-pub fn write_dxf_with_holes(
+/// Input coordinates should be in meters (SI base unit).
+/// Output DXF will be in millimeters.
+pub fn write_dxf(
     output_path: &str,
     boundary: &Polygon<f64>,
     hole_centers: &[Coord<f64>],
     hole_diameter: f64,
 ) -> Result<()> {
-    println!("\n=== DXF Output ===");
-    println!("Writing to: {}", output_path);
-    println!("Number of holes: {}", hole_centers.len());
-    println!("Hole diameter: {:.3} μm", hole_diameter);
-
     let mut drawing = Drawing::new();
 
     // Add boundary polygon as LWPOLYLINE on layer "BOUNDARY"
@@ -35,8 +30,6 @@ pub fn write_dxf_with_holes(
         .save_file(output_path)
         .map_err(|e| anyhow::anyhow!("Failed to save DXF: {:?}", e))?;
 
-    println!("DXF file written successfully!");
-
     Ok(())
 }
 
@@ -50,8 +43,8 @@ fn add_boundary_to_drawing(
 
     for coord in boundary.exterior().coords() {
         vertices.push(LwPolylineVertex {
-            x: coord.x,
-            y: coord.y,
+            x: coord.x * M_TO_MM,
+            y: coord.y * M_TO_MM,
             id: 0,
             starting_width: 0.0,
             ending_width: 0.0,
@@ -68,8 +61,6 @@ fn add_boundary_to_drawing(
         entity.common.layer = layer.to_string();
 
         drawing.add_entity(entity);
-
-        println!("Added boundary polygon with {} vertices", boundary.exterior().coords().count());
     }
 
     Ok(())
@@ -84,8 +75,12 @@ fn add_holes_to_drawing(
 ) -> Result<()> {
     for center in hole_centers {
         let mut circle = Circle::default();
-        circle.center = dxf::Point::new(center.x, center.y, 0.0);
-        circle.radius = hole_radius;
+        circle.center = dxf::Point::new(
+            center.x * M_TO_MM,
+            center.y * M_TO_MM,
+            0.0
+        );
+        circle.radius = hole_radius * M_TO_MM;
 
         let mut entity = Entity::new(EntityType::Circle(circle));
         entity.common.layer = layer.to_string();
@@ -93,38 +88,5 @@ fn add_holes_to_drawing(
         drawing.add_entity(entity);
     }
 
-    println!("Added {} holes to layer '{}'", hole_centers.len(), layer);
-
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use geo::LineString;
-
-    #[test]
-    fn test_dxf_output() {
-        let boundary = Polygon::new(
-            LineString::from(vec![
-                (0.0, 0.0),
-                (10.0, 0.0),
-                (10.0, 10.0),
-                (0.0, 10.0),
-                (0.0, 0.0),
-            ]),
-            vec![],
-        );
-
-        let hole_centers = vec![
-            Coord { x: 2.0, y: 2.0 },
-            Coord { x: 5.0, y: 5.0 },
-            Coord { x: 8.0, y: 8.0 },
-        ];
-
-        // This would write to a file in a real test
-        // For now, just verify the function signature compiles
-        assert!(boundary.exterior().coords().count() > 0);
-        assert_eq!(hole_centers.len(), 3);
-    }
 }
