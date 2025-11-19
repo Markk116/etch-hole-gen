@@ -6,6 +6,8 @@ use svg::Document;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 
+const STROKE_WIDTH: f64 = 0.002;
+
 /// Export visualization as SVG file
 ///
 /// # Arguments
@@ -21,6 +23,7 @@ pub fn write_svg(
     hole_diameter: f64,
     scale: f64,
 ) -> Result<()> {
+
     println!("\n=== SVG Export ===");
     println!("Writing to: {}", output_path);
     println!("Scale: {} px/μm", scale);
@@ -58,7 +61,7 @@ pub fn write_svg(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", 2)
+        .set("stroke-width", STROKE_WIDTH*2.0)
         .set("d", path_data);
 
     document = document.add(boundary_path);
@@ -69,7 +72,7 @@ pub fn write_svg(
         .set("fill", "red")
         .set("fill-opacity", 0.5)
         .set("stroke", "red")
-        .set("stroke-width", 0.5);
+        .set("stroke-width", STROKE_WIDTH);
 
     for center in hole_centers {
         let cx = (center.x - min_x) * scale + margin;
@@ -146,7 +149,7 @@ pub fn write_voronoi_svg(
         let mut cells_group = Group::new()
             .set("fill", "none")
             .set("stroke", "blue")
-            .set("stroke-width", 0.5)
+            .set("stroke-width", STROKE_WIDTH)
             .set("stroke-opacity", 0.5);
 
         let all_cells = diagram.cells();
@@ -190,7 +193,7 @@ pub fn write_voronoi_svg(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", 2)
+        .set("stroke-width", STROKE_WIDTH)
         .set("d", path_data);
 
     document = document.add(boundary_path);
