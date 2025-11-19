@@ -15,4 +15,5 @@ clap = { version = "4", features = ["derive"] }
 rayon = "1.10"
 ctrlc = "3.4"
 usvg = "0.37"
+gds21 = "3.0.0-pre.2"
 

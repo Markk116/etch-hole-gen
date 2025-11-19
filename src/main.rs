@@ -3,6 +3,7 @@ mod cvt;
 mod dxf_output;
 mod svg_output;
 mod svg_input;
+mod gds_output;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -65,9 +66,13 @@ struct Args {
     #[arg(long)]
     debug_svg: Option<String>,
 
-    /// Include boundary outline in output DXF
+    /// Include boundary outline in output DXF/GDS
     #[arg(long)]
     include_outline: bool,
+
+    /// Optional GDS output file path
+    #[arg(long)]
+    gds: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -169,6 +174,18 @@ fn main() -> Result<()> {
         let scale = 1.0 / pitch_m * 10.0;
         svg_output::write_voronoi_svg(voronoi_path, &boundary, &optimized_points, scale)?;
         println!("      Voronoi SVG: {}", voronoi_path);
+    }
+
+    // Optional GDS output
+    if let Some(ref gds_path) = args.gds {
+        gds_output::write_gds(
+            Path::new(gds_path),
+            &boundary,
+            &optimized_points,
+            diameter_m,
+            args.include_outline,
+        )?;
+        println!("      GDS: {}", gds_path);
     }
 
     println!("\nDone! Generated {} holes. [{:.2}s]", optimized_points.len(), start_time.elapsed().as_secs_f64());
