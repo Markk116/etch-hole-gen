@@ -2,12 +2,14 @@ mod hcp_grid;
 mod cvt;
 mod dxf_output;
 mod svg_output;
+mod svg_input;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use dxf::entities::*;
 use dxf::Drawing;
 use geo::{Coord, LineString, Polygon};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -97,12 +99,26 @@ fn main() -> Result<()> {
     println!("  Iterations: {}", args.iterations);
     println!("  Threshold:  {:.3e} m", args.threshold);
 
-    // Step 1: Load DXF and extract boundary
-    println!("\n[1/4] Loading DXF file... [{:.2}s]", start_time.elapsed().as_secs_f64());
-    let drawing = Drawing::load_file(&args.input)
-        .context("Failed to load DXF file")?;
+    // Step 1: Load input file and extract boundary
+    let input_path = Path::new(&args.input);
+    let extension = input_path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
 
-    let boundary = extract_boundary(&drawing)?;
+    println!("\n[1/4] Loading input file... [{:.2}s]", start_time.elapsed().as_secs_f64());
+
+    let boundary = match extension.as_str() {
+        "svg" => {
+            svg_input::extract_boundary_from_svg(input_path)?
+        }
+        "dxf" | _ => {
+            let drawing = Drawing::load_file(&args.input)
+                .context("Failed to load DXF file")?;
+            extract_boundary_from_dxf(&drawing)?
+        }
+    };
+
     let vertex_count = boundary.exterior().coords().count();
     println!("      Loaded boundary with {} vertices", vertex_count);
 
@@ -161,7 +177,7 @@ fn main() -> Result<()> {
 }
 
 /// Extract the membrane boundary polygon from a DXF drawing
-fn extract_boundary(drawing: &Drawing) -> Result<Polygon<f64>> {
+fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
     let mut closed_polygons = Vec::new();
     let mut open_segments: Vec<Vec<Coord<f64>>> = Vec::new();
 

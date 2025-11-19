@@ -14,4 +14,5 @@ geo-clipper = "0.8"
 clap = { version = "4", features = ["derive"] }
 rayon = "1.10"
 ctrlc = "3.4"
+usvg = "0.37"
 
