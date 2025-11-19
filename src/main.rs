@@ -67,7 +67,7 @@ fn main() -> Result<()> {
     // Convert user input from micrometers to meters (SI base unit)
     let pitch_m = args.pitch * UM_TO_M;
     let diameter_m = args.diameter * UM_TO_M;
-    let clearance_m = args.clearance.map(|c| c * UM_TO_M).unwrap_or(pitch_m);
+    let clearance_m = args.clearance.map(|c| c * UM_TO_M).unwrap_or(pitch_m/2.0);
 
     // Print header
     println!("Etch Hole Pattern Generator");
