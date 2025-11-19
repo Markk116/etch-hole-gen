@@ -60,6 +60,10 @@ struct Args {
     /// Debug mode: output SVG at each iteration with given prefix
     #[arg(long)]
     debug_svg: Option<String>,
+
+    /// Include boundary outline in output DXF
+    #[arg(long)]
+    include_outline: bool,
 }
 
 fn main() -> Result<()> {
@@ -124,7 +128,7 @@ fn main() -> Result<()> {
     println!("\n[4/4] Writing output files... [{:.2}s]", start_time.elapsed().as_secs_f64());
 
     // Write DXF (convert back to mm)
-    dxf_output::write_dxf(&args.output, &boundary, &optimized_points, diameter_m)?;
+    dxf_output::write_dxf(&args.output, &boundary, &optimized_points, diameter_m, args.include_outline)?;
     println!("      DXF: {}", args.output);
 
     // Optional SVG outputs

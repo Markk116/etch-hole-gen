@@ -15,11 +15,14 @@ pub fn write_dxf(
     boundary: &Polygon<f64>,
     hole_centers: &[Coord<f64>],
     hole_diameter: f64,
+    include_outline: bool,
 ) -> Result<()> {
     let mut drawing = Drawing::new();
 
-    // Add boundary polygon as LWPOLYLINE on layer "BOUNDARY"
-    add_boundary_to_drawing(&mut drawing, boundary, "BOUNDARY")?;
+    // Optionally add boundary polygon as LWPOLYLINE on layer "BOUNDARY"
+    if include_outline {
+        add_boundary_to_drawing(&mut drawing, boundary, "BOUNDARY")?;
+    }
 
     // Add holes as circles on layer "HOLES"
     let hole_radius = hole_diameter / 2.0;

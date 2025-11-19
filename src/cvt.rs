@@ -6,6 +6,7 @@ use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 use anyhow::Result;
 use std::time::Instant;
+use rayon::prelude::*;
 use crate::svg_output;
 
 /// Statistics from CVT optimization
@@ -55,30 +56,42 @@ pub fn compute_cvt(
             None => break,
         };
 
-        // Compute new centroids
-        let mut new_points = Vec::new();
-        let mut total_movement = 0.0;
-        let mut cell_areas = Vec::new();
-        let mut cell_elongations = Vec::new();
+        // Compute new centroids in parallel
+        let results: Vec<(Coord<f64>, f64, f64, f64)> = (0..points.len())
+            .into_par_iter()
+            .map(|i| {
+                let old_point = points[i];
+                let cell = get_voronoi_cell(&diagram, i, boundary);
 
-        for (i, old_point) in points.iter().enumerate() {
-            let cell = get_voronoi_cell(&diagram, i, boundary);
-
-            if let Some(centroid) = compute_polygon_centroid(&cell) {
-                if boundary.contains(&centroid) {
-                    total_movement += distance(old_point, &centroid);
-                    new_points.push(centroid);
-                    cell_areas.push(polygon_area(&cell));
-                    cell_elongations.push(compute_cell_elongation(&cell, &centroid));
+                if let Some(centroid) = compute_polygon_centroid(&cell) {
+                    if boundary.contains(&centroid) {
+                        let movement = distance(&old_point, &centroid);
+                        let area = polygon_area(&cell);
+                        let elongation = compute_cell_elongation(&cell, &centroid);
+                        (centroid, movement, area, elongation)
+                    } else {
+                        let area = polygon_area(&cell);
+                        (old_point, 0.0, area, 1.0)
+                    }
                 } else {
-                    new_points.push(*old_point);
-                    cell_areas.push(polygon_area(&cell));
-                    cell_elongations.push(1.0);
+                    (old_point, 0.0, 0.0, 1.0)
                 }
-            } else {
-                new_points.push(*old_point);
-                cell_elongations.push(1.0);
+            })
+            .collect();
+
+        // Unpack results
+        let mut new_points = Vec::with_capacity(results.len());
+        let mut total_movement = 0.0;
+        let mut cell_areas = Vec::with_capacity(results.len());
+        let mut cell_elongations = Vec::with_capacity(results.len());
+
+        for (point, movement, area, elongation) in results {
+            new_points.push(point);
+            total_movement += movement;
+            if area > 0.0 {
+                cell_areas.push(area);
             }
+            cell_elongations.push(elongation);
         }
 
         points = new_points;
@@ -124,24 +137,31 @@ pub fn compute_cvt(
     let (min_pt, max_pt) = compute_bounding_box(boundary);
 
     if let Some(diagram) = VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
-        let mut final_points = Vec::new();
-        let mut elongations = Vec::new();
+        // Final snap in parallel
+        let results: Vec<(Coord<f64>, f64)> = (0..points.len())
+            .into_par_iter()
+            .map(|i| {
+                let cell = get_voronoi_cell(&diagram, i, boundary);
 
-        for (i, _) in points.iter().enumerate() {
-            let cell = get_voronoi_cell(&diagram, i, boundary);
-
-            if let Some(centroid) = compute_polygon_centroid(&cell) {
-                if boundary.contains(&centroid) {
-                    final_points.push(centroid);
-                    elongations.push(compute_cell_elongation(&cell, &centroid));
+                if let Some(centroid) = compute_polygon_centroid(&cell) {
+                    if boundary.contains(&centroid) {
+                        let elongation = compute_cell_elongation(&cell, &centroid);
+                        (centroid, elongation)
+                    } else {
+                        (points[i], 1.0)
+                    }
                 } else {
-                    final_points.push(points[i]);
-                    elongations.push(1.0);
+                    (points[i], 1.0)
                 }
-            } else {
-                final_points.push(points[i]);
-                elongations.push(1.0);
-            }
+            })
+            .collect();
+
+        let mut final_points = Vec::with_capacity(results.len());
+        let mut elongations = Vec::with_capacity(results.len());
+
+        for (point, elongation) in results {
+            final_points.push(point);
+            elongations.push(elongation);
         }
 
         points = final_points;
