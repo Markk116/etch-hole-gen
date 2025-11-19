@@ -6,16 +6,10 @@ use svg::Document;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 
-const STROKE_WIDTH: f64 = 0.002;
-
 /// Export visualization as SVG file
 ///
-/// # Arguments
-/// * `output_path` - Path to output SVG file
-/// * `boundary` - Boundary polygon
-/// * `hole_centers` - Centers of holes
-/// * `hole_diameter` - Diameter of each hole (in micrometers)
-/// * `scale` - Scale factor for visualization (pixels per micrometer)
+/// Input coordinates should be in meters (SI base unit).
+/// Scale converts meters to pixels.
 pub fn write_svg(
     output_path: &str,
     boundary: &Polygon<f64>,
@@ -23,11 +17,6 @@ pub fn write_svg(
     hole_diameter: f64,
     scale: f64,
 ) -> Result<()> {
-
-    println!("\n=== SVG Export ===");
-    println!("Writing to: {}", output_path);
-    println!("Scale: {} px/μm", scale);
-
     // Compute bounding box
     let coords: Vec<_> = boundary.exterior().coords().collect();
     let min_x = coords.iter().map(|c| c.x).fold(f64::INFINITY, f64::min);
@@ -61,7 +50,7 @@ pub fn write_svg(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", STROKE_WIDTH*2.0)
+        .set("stroke-width", 2)
         .set("d", path_data);
 
     document = document.add(boundary_path);
@@ -72,7 +61,7 @@ pub fn write_svg(
         .set("fill", "red")
         .set("fill-opacity", 0.5)
         .set("stroke", "red")
-        .set("stroke-width", STROKE_WIDTH);
+        .set("stroke-width", 0.5);
 
     for center in hole_centers {
         let cx = (center.x - min_x) * scale + margin;
@@ -88,31 +77,21 @@ pub fn write_svg(
 
     document = document.add(holes_group);
 
-    // Write to file
     svg::save(output_path, &document)?;
-
-    println!("SVG file written successfully!");
 
     Ok(())
 }
 
 /// Export Voronoi diagram visualization as SVG file
 ///
-/// # Arguments
-/// * `output_path` - Path to output SVG file
-/// * `boundary` - Boundary polygon
-/// * `hole_centers` - Centers of holes (Voronoi sites)
-/// * `scale` - Scale factor for visualization (pixels per micrometer)
+/// Input coordinates should be in meters (SI base unit).
+/// Scale converts meters to pixels.
 pub fn write_voronoi_svg(
     output_path: &str,
     boundary: &Polygon<f64>,
     hole_centers: &[Coord<f64>],
     scale: f64,
 ) -> Result<()> {
-    println!("\n=== Voronoi Diagram SVG Export ===");
-    println!("Writing to: {}", output_path);
-    println!("Scale: {} px/μm", scale);
-
     // Compute bounding box
     let coords: Vec<_> = boundary.exterior().coords().collect();
     let min_x = coords.iter().map(|c| c.x).fold(f64::INFINITY, f64::min);
@@ -149,7 +128,7 @@ pub fn write_voronoi_svg(
         let mut cells_group = Group::new()
             .set("fill", "none")
             .set("stroke", "blue")
-            .set("stroke-width", STROKE_WIDTH)
+            .set("stroke-width", 0.5)
             .set("stroke-opacity", 0.5);
 
         let all_cells = diagram.cells();
@@ -193,7 +172,7 @@ pub fn write_voronoi_svg(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", STROKE_WIDTH)
+        .set("stroke-width", 2)
         .set("d", path_data);
 
     document = document.add(boundary_path);
@@ -217,40 +196,7 @@ pub fn write_voronoi_svg(
 
     document = document.add(sites_group);
 
-    // Write to file
     svg::save(output_path, &document)?;
 
-    println!("Voronoi SVG file written successfully!");
-
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use geo::LineString;
-
-    #[test]
-    fn test_svg_output() {
-        let boundary = Polygon::new(
-            LineString::from(vec![
-                (0.0, 0.0),
-                (10.0, 0.0),
-                (10.0, 10.0),
-                (0.0, 10.0),
-                (0.0, 0.0),
-            ]),
-            vec![],
-        );
-
-        let hole_centers = vec![
-            Coord { x: 2.0, y: 2.0 },
-            Coord { x: 5.0, y: 5.0 },
-            Coord { x: 8.0, y: 8.0 },
-        ];
-
-        // Verify the function signature compiles
-        assert!(boundary.exterior().coords().count() > 0);
-        assert_eq!(hole_centers.len(), 3);
-    }
 }

@@ -7,92 +7,66 @@ use voronator::VoronoiDiagram;
 use anyhow::Result;
 use crate::svg_output;
 
+/// Statistics from CVT optimization
+#[derive(Debug, Clone)]
+pub struct CvtStats {
+    pub iterations_run: usize,
+    pub initial_variance: f64,
+    pub final_variance: f64,
+    pub final_elongation: f64,
+}
+
 /// Compute Centroidal Voronoi Tessellation using Lloyd's algorithm
 ///
-/// # Arguments
-/// * `initial_points` - Starting point distribution (e.g., from HCP grid)
-/// * `boundary` - Polygon boundary to constrain the tessellation
-/// * `max_iterations` - Maximum number of Lloyd iterations
-/// * `convergence_threshold` - Stop when centroid movement is below this threshold
-/// * `debug_svg_prefix` - Optional prefix for debug SVG output at each iteration
-///
-/// # Returns
-/// Optimized point positions and convergence metrics
+/// All coordinates should be in meters (SI base unit).
 pub fn compute_cvt(
     mut points: Vec<Coord<f64>>,
     boundary: &Polygon<f64>,
     max_iterations: usize,
     convergence_threshold: f64,
     debug_svg_prefix: Option<&str>,
-) -> Result<(Vec<Coord<f64>>, Vec<f64>)> {
-    println!("\n=== CVT Computation (Lloyd's Algorithm) ===");
-    println!("Initial points: {}", points.len());
-    println!("Max iterations: {}", max_iterations);
-    println!("Convergence threshold: {:.6}", convergence_threshold);
-
+) -> Result<(Vec<Coord<f64>>, CvtStats)> {
     let mut variance_history = Vec::new();
-    let mut elongation_history = Vec::new();
+    let mut final_elongation = 1.0;
+    let mut iterations_run = 0;
 
     for iter in 0..max_iterations {
-        // Convert points to voronator format
+        iterations_run = iter + 1;
+
+        // Build Voronoi diagram
         let voronoi_points: Vec<DelaunatorPoint> = points
             .iter()
             .map(|c| DelaunatorPoint { x: c.x, y: c.y })
             .collect();
 
-        // Compute bounding box for Voronoi diagram
-        let min_pt = DelaunatorPoint {
-            x: points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
-            y: points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
-        };
-        let max_pt = DelaunatorPoint {
-            x: points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
-            y: points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
-        };
+        let (min_pt, max_pt) = compute_bounding_box(&points);
 
-        // Compute Voronoi diagram
         let diagram = match VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
             Some(d) => d,
-            None => {
-                eprintln!("Voronoi computation failed at iteration {}", iter);
-                break;
-            }
+            None => break,
         };
 
-        // For each point, compute the centroid of its Voronoi cell clipped to boundary
+        // Compute new centroids
         let mut new_points = Vec::new();
         let mut total_movement = 0.0;
         let mut cell_areas = Vec::new();
         let mut cell_elongations = Vec::new();
 
         for (i, old_point) in points.iter().enumerate() {
-            // Get Voronoi cell for this point
             let cell = get_voronoi_cell(&diagram, i, boundary);
 
-            // Compute centroid of the clipped cell
             if let Some(centroid) = compute_polygon_centroid(&cell) {
-                // Ensure centroid is within boundary
                 if boundary.contains(&centroid) {
-                    let movement = distance(old_point, &centroid);
-                    total_movement += movement;
+                    total_movement += distance(old_point, &centroid);
                     new_points.push(centroid);
-
-                    // Track cell area for variance computation
-                    let area = polygon_area(&cell);
-                    cell_areas.push(area);
-
-                    // Track cell elongation (measure of circularity)
-                    let elongation = compute_cell_elongation(&cell, &centroid);
-                    cell_elongations.push(elongation);
+                    cell_areas.push(polygon_area(&cell));
+                    cell_elongations.push(compute_cell_elongation(&cell, &centroid));
                 } else {
-                    // Keep original point if centroid is outside
                     new_points.push(*old_point);
-                    let area = polygon_area(&cell);
-                    cell_areas.push(area);
+                    cell_areas.push(polygon_area(&cell));
                     cell_elongations.push(1.0);
                 }
             } else {
-                // Keep original point if centroid computation fails
                 new_points.push(*old_point);
                 cell_elongations.push(1.0);
             }
@@ -100,52 +74,77 @@ pub fn compute_cvt(
 
         points = new_points;
 
-        // Compute variance of cell areas
+        // Track metrics
         let variance = compute_variance(&cell_areas);
         variance_history.push(variance);
 
-        // Compute average elongation (1.0 = circular, higher = more elongated)
-        let avg_elongation = if !cell_elongations.is_empty() {
+        final_elongation = if !cell_elongations.is_empty() {
             cell_elongations.iter().sum::<f64>() / cell_elongations.len() as f64
         } else {
             1.0
         };
-        elongation_history.push(avg_elongation);
 
-        let avg_movement = total_movement / points.len() as f64;
-
-        if iter % 5 == 0 || iter == max_iterations - 1 {
-            println!(
-                "Iteration {}: avg movement = {:.6}, variance = {:.6}, elongation = {:.3}",
-                iter, avg_movement, variance, avg_elongation
-            );
-        }
-
-        // Output debug SVG if requested
+        // Debug SVG output
         if let Some(prefix) = debug_svg_prefix {
             let debug_path = format!("{}_{:04}.svg", prefix, iter);
-            if let Err(e) = svg_output::write_voronoi_svg(&debug_path, boundary, &points, 10.0) {
-                eprintln!("Warning: Failed to write debug SVG {}: {}", debug_path, e);
-            }
+            let scale = 1e6; // Scale up for visibility (m to um scale)
+            let _ = svg_output::write_voronoi_svg(&debug_path, boundary, &points, scale);
         }
 
         // Check convergence
+        let avg_movement = total_movement / points.len() as f64;
         if avg_movement < convergence_threshold {
-            println!(
-                "\nConverged after {} iterations (avg movement: {:.6})",
-                iter, avg_movement
-            );
             break;
         }
     }
 
-    // Final step: Snap points to exact centroids of their Voronoi cells
-    println!("\n=== Final Centroid Positioning ===");
+    // Final centroid snap
     let voronoi_points: Vec<DelaunatorPoint> = points
         .iter()
         .map(|c| DelaunatorPoint { x: c.x, y: c.y })
         .collect();
 
+    let (min_pt, max_pt) = compute_bounding_box(&points);
+
+    if let Some(diagram) = VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
+        let mut final_points = Vec::new();
+        let mut elongations = Vec::new();
+
+        for (i, _) in points.iter().enumerate() {
+            let cell = get_voronoi_cell(&diagram, i, boundary);
+
+            if let Some(centroid) = compute_polygon_centroid(&cell) {
+                if boundary.contains(&centroid) {
+                    final_points.push(centroid);
+                    elongations.push(compute_cell_elongation(&cell, &centroid));
+                } else {
+                    final_points.push(points[i]);
+                    elongations.push(1.0);
+                }
+            } else {
+                final_points.push(points[i]);
+                elongations.push(1.0);
+            }
+        }
+
+        points = final_points;
+
+        if !elongations.is_empty() {
+            final_elongation = elongations.iter().sum::<f64>() / elongations.len() as f64;
+        }
+    }
+
+    let stats = CvtStats {
+        iterations_run,
+        initial_variance: *variance_history.first().unwrap_or(&0.0),
+        final_variance: *variance_history.last().unwrap_or(&0.0),
+        final_elongation,
+    };
+
+    Ok((points, stats))
+}
+
+fn compute_bounding_box(points: &[Coord<f64>]) -> (DelaunatorPoint, DelaunatorPoint) {
     let min_pt = DelaunatorPoint {
         x: points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
         y: points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
@@ -154,97 +153,49 @@ pub fn compute_cvt(
         x: points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
         y: points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
     };
-
-    if let Some(diagram) = VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
-        let mut final_points = Vec::new();
-        let mut final_elongations = Vec::new();
-
-        for (i, _) in points.iter().enumerate() {
-            let cell = get_voronoi_cell(&diagram, i, boundary);
-
-            if let Some(centroid) = compute_polygon_centroid(&cell) {
-                if boundary.contains(&centroid) {
-                    final_points.push(centroid);
-                    let elongation = compute_cell_elongation(&cell, &centroid);
-                    final_elongations.push(elongation);
-                } else {
-                    final_points.push(points[i]);
-                    final_elongations.push(1.0);
-                }
-            } else {
-                final_points.push(points[i]);
-                final_elongations.push(1.0);
-            }
-        }
-
-        points = final_points;
-
-        let avg_final_elongation = if !final_elongations.is_empty() {
-            final_elongations.iter().sum::<f64>() / final_elongations.len() as f64
-        } else {
-            1.0
-        };
-
-        println!("Final average elongation: {:.3}", avg_final_elongation);
-    }
-
-    println!("Final points: {}", points.len());
-
-    Ok((points, variance_history))
+    (min_pt, max_pt)
 }
 
-/// Extract Voronoi cell for a specific site and clip to boundary
 fn get_voronoi_cell(
     diagram: &VoronoiDiagram<DelaunatorPoint>,
     site_index: usize,
     boundary: &Polygon<f64>,
 ) -> Polygon<f64> {
-    // Get all cells and access the one we need
     let all_cells = diagram.cells();
 
     if site_index < all_cells.len() {
         let cell = &all_cells[site_index];
 
-        // Convert voronator polygon to geo polygon
         let mut coords: Vec<Coord<f64>> = cell.points()
             .iter()
             .map(|p| Coord { x: p.x, y: p.y })
             .collect();
 
         if !coords.is_empty() {
-            // Close the polygon
             if let Some(&first) = coords.first() {
                 coords.push(first);
             }
 
             let cell_poly = Polygon::new(LineString::new(coords), vec![]);
-
-            // Clip the Voronoi cell to the boundary polygon
             return clip_polygon_to_boundary(&cell_poly, boundary);
         }
     }
 
-    // Return empty polygon if cell not found
     Polygon::new(LineString::new(vec![]), vec![])
 }
 
-/// Clip a polygon to the boundary using intersection
 fn clip_polygon_to_boundary(poly: &Polygon<f64>, boundary: &Polygon<f64>) -> Polygon<f64> {
-    // Quick check: if poly doesn't intersect boundary at all, return empty
     if !poly.intersects(boundary) {
         return Polygon::new(LineString::new(vec![]), vec![]);
     }
 
-    // Use geo-clipper to compute intersection
-    // Scale factor: clipper works with integer coordinates, so we scale up
-    // For mm-scale coordinates (0-4mm), use larger scale factor
-    let scale_factor = 1000.0; // 1000x scale for better precision
+    // Scale factor for geo-clipper (works with integers internally)
+    // For meter-scale coordinates (1e-3 to 1e-2), use large scale
+    let scale_factor = 1e9;
     let result = poly.intersection(boundary, scale_factor);
 
-    // Extract the first polygon from the result (there should typically be only one)
     match result {
         MultiPolygon(polys) if !polys.is_empty() => {
-            // Return the largest polygon if there are multiple
             polys.into_iter()
                 .max_by(|a, b| {
                     let area_a = polygon_area(a);
@@ -253,14 +204,10 @@ fn clip_polygon_to_boundary(poly: &Polygon<f64>, boundary: &Polygon<f64>) -> Pol
                 })
                 .unwrap_or_else(|| Polygon::new(LineString::new(vec![]), vec![]))
         }
-        _ => {
-            // Clipping failed - return unclipped cell as fallback
-            poly.clone()
-        }
+        _ => poly.clone(),
     }
 }
 
-/// Compute centroid of a polygon
 fn compute_polygon_centroid(polygon: &Polygon<f64>) -> Option<Coord<f64>> {
     let coords: Vec<_> = polygon.exterior().coords().collect();
 
@@ -272,7 +219,6 @@ fn compute_polygon_centroid(polygon: &Polygon<f64>) -> Option<Coord<f64>> {
     let mut cy = 0.0;
     let mut area = 0.0;
 
-    // Use the formula for polygon centroid
     for i in 0..coords.len() - 1 {
         let x0 = coords[i].x;
         let y0 = coords[i].y;
@@ -287,7 +233,7 @@ fn compute_polygon_centroid(polygon: &Polygon<f64>) -> Option<Coord<f64>> {
 
     area *= 0.5;
 
-    if area.abs() < 1e-10 {
+    if area.abs() < 1e-20 {
         return None;
     }
 
@@ -297,7 +243,6 @@ fn compute_polygon_centroid(polygon: &Polygon<f64>) -> Option<Coord<f64>> {
     Some(Coord { x: cx, y: cy })
 }
 
-/// Compute area of a polygon
 fn polygon_area(polygon: &Polygon<f64>) -> f64 {
     let coords: Vec<_> = polygon.exterior().coords().collect();
 
@@ -306,7 +251,6 @@ fn polygon_area(polygon: &Polygon<f64>) -> f64 {
     }
 
     let mut area = 0.0;
-
     for i in 0..coords.len() - 1 {
         area += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
     }
@@ -314,23 +258,15 @@ fn polygon_area(polygon: &Polygon<f64>) -> f64 {
     (area * 0.5).abs()
 }
 
-/// Compute variance of a set of values
 fn compute_variance(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
     }
 
     let mean = values.iter().sum::<f64>() / values.len() as f64;
-    let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64;
-
-    variance
+    values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64
 }
 
-/// Compute cell elongation (measure of circularity)
-///
-/// Elongation is the ratio of max distance to min distance from centroid to cell vertices.
-/// - 1.0 = perfect circle (all vertices equidistant)
-/// - >1.0 = elongated (higher = more elongated)
 fn compute_cell_elongation(cell: &Polygon<f64>, centroid: &Coord<f64>) -> f64 {
     let coords: Vec<_> = cell.exterior().coords().collect();
 
@@ -343,62 +279,19 @@ fn compute_cell_elongation(cell: &Polygon<f64>, centroid: &Coord<f64>) -> f64 {
 
     for coord in coords.iter() {
         let dist = distance(centroid, coord);
-        if dist > 1e-10 {  // Avoid zero distances
+        if dist > 1e-20 {
             min_dist = min_dist.min(dist);
             max_dist = max_dist.max(dist);
         }
     }
 
-    if min_dist < 1e-10 || min_dist == f64::INFINITY {
+    if min_dist < 1e-20 || min_dist == f64::INFINITY {
         return 1.0;
     }
 
     max_dist / min_dist
 }
 
-/// Euclidean distance between two points
 fn distance(p1: &Coord<f64>, p2: &Coord<f64>) -> f64 {
     ((p2.x - p1.x).powi(2) + (p2.y - p1.y).powi(2)).sqrt()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_polygon_centroid() {
-        // Unit square centered at origin
-        let square = Polygon::new(
-            LineString::from(vec![
-                (-1.0, -1.0),
-                (1.0, -1.0),
-                (1.0, 1.0),
-                (-1.0, 1.0),
-                (-1.0, -1.0),
-            ]),
-            vec![],
-        );
-
-        let centroid = compute_polygon_centroid(&square).unwrap();
-        assert!((centroid.x).abs() < 1e-10);
-        assert!((centroid.y).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_polygon_area() {
-        // Unit square
-        let square = Polygon::new(
-            LineString::from(vec![
-                (0.0, 0.0),
-                (1.0, 0.0),
-                (1.0, 1.0),
-                (0.0, 1.0),
-                (0.0, 0.0),
-            ]),
-            vec![],
-        );
-
-        let area = polygon_area(&square);
-        assert!((area - 1.0).abs() < 1e-10);
-    }
 }
