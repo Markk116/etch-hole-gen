@@ -8,6 +8,8 @@ use clap::Parser;
 use dxf::entities::*;
 use dxf::Drawing;
 use geo::{Coord, LineString, Polygon};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 /// Unit conversion constants
@@ -70,6 +72,14 @@ fn main() -> Result<()> {
     let start_time = Instant::now();
     let args = Args::parse();
 
+    // Set up interrupt handler
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_clone = interrupted.clone();
+    ctrlc::set_handler(move || {
+        interrupted_clone.store(true, Ordering::SeqCst);
+        eprintln!("\nInterrupt received, finishing current iteration...");
+    }).expect("Error setting Ctrl-C handler");
+
     // Convert user input from micrometers to meters (SI base unit)
     let pitch_m = args.pitch * UM_TO_M;
     let diameter_m = args.diameter * UM_TO_M;
@@ -114,6 +124,7 @@ fn main() -> Result<()> {
         args.threshold,
         args.debug_svg.as_deref(),
         start_time,
+        &interrupted,
     )?;
 
     println!("      Completed in {} iterations", stats.iterations_run);

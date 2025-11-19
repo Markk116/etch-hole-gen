@@ -5,6 +5,8 @@ use geo_clipper::Clipper;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 use anyhow::Result;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use rayon::prelude::*;
 use crate::svg_output;
@@ -28,6 +30,7 @@ pub fn compute_cvt(
     convergence_threshold: f64,
     debug_svg_prefix: Option<&str>,
     start_time: Instant,
+    interrupted: &Arc<AtomicBool>,
 ) -> Result<(Vec<Coord<f64>>, CvtStats)> {
     let mut variance_history = Vec::new();
     let mut final_elongation = 1.0;
@@ -124,6 +127,12 @@ pub fn compute_cvt(
         // Check convergence
         let avg_movement = total_movement / points.len() as f64;
         if avg_movement < convergence_threshold {
+            break;
+        }
+
+        // Check for interrupt
+        if interrupted.load(Ordering::SeqCst) {
+            println!("      Interrupted after {} iterations", iter + 1);
             break;
         }
     }
