@@ -4,6 +4,7 @@ mod dxf_output;
 mod svg_output;
 mod svg_input;
 mod gds_output;
+mod oasis_output;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -73,6 +74,10 @@ struct Args {
     /// Optional GDS output file path
     #[arg(long)]
     gds: Option<String>,
+
+    /// Optional OASIS output file path
+    #[arg(long)]
+    oasis: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -186,6 +191,18 @@ fn main() -> Result<()> {
             args.include_outline,
         )?;
         println!("      GDS: {}", gds_path);
+    }
+
+    // Optional OASIS output
+    if let Some(ref oasis_path) = args.oasis {
+        oasis_output::write_oasis(
+            Path::new(oasis_path),
+            &boundary,
+            &optimized_points,
+            diameter_m,
+            args.include_outline,
+        )?;
+        println!("      OASIS: {}", oasis_path);
     }
 
     println!("\nDone! Generated {} holes. [{:.2}s]", optimized_points.len(), start_time.elapsed().as_secs_f64());
