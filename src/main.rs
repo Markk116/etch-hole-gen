@@ -8,6 +8,7 @@ use clap::Parser;
 use dxf::entities::*;
 use dxf::Drawing;
 use geo::{Coord, LineString, Polygon};
+use std::time::Instant;
 
 /// Unit conversion constants
 const UM_TO_M: f64 = 1e-6;  // micrometers to meters
@@ -62,6 +63,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    let start_time = Instant::now();
     let args = Args::parse();
 
     // Convert user input from micrometers to meters (SI base unit)
@@ -77,12 +79,12 @@ fn main() -> Result<()> {
     println!("\nParameters:");
     println!("  Pitch:      {:.2} um ({:.3e} m)", args.pitch, pitch_m);
     println!("  Diameter:   {:.2} um ({:.3e} m)", args.diameter, diameter_m);
-    println!("  Clearance:  {:.2} um ({:.3e} m)", args.clearance.unwrap_or(args.pitch), clearance_m);
+    println!("  Clearance:  {:.2} um ({:.3e} m)", args.clearance.unwrap_or(args.pitch/2.0), clearance_m);
     println!("  Iterations: {}", args.iterations);
     println!("  Threshold:  {:.3e} m", args.threshold);
 
     // Step 1: Load DXF and extract boundary
-    println!("\n[1/4] Loading DXF file...");
+    println!("\n[1/4] Loading DXF file... [{:.2}s]", start_time.elapsed().as_secs_f64());
     let drawing = Drawing::load_file(&args.input)
         .context("Failed to load DXF file")?;
 
@@ -91,7 +93,7 @@ fn main() -> Result<()> {
     println!("      Loaded boundary with {} vertices", vertex_count);
 
     // Step 2: Generate initial HCP grid
-    println!("\n[2/4] Generating HCP grid...");
+    println!("\n[2/4] Generating HCP grid... [{:.2}s]", start_time.elapsed().as_secs_f64());
     let initial_points = hcp_grid::generate_hcp_grid(&boundary, pitch_m, clearance_m);
 
     if initial_points.is_empty() {
@@ -100,13 +102,14 @@ fn main() -> Result<()> {
     println!("      Generated {} initial points", initial_points.len());
 
     // Step 3: Optimize with CVT
-    println!("\n[3/4] Running CVT optimization...");
+    println!("\n[3/4] Running CVT optimization... [{:.2}s]", start_time.elapsed().as_secs_f64());
     let (optimized_points, stats) = cvt::compute_cvt(
         initial_points,
         &boundary,
         args.iterations,
         args.threshold,
         args.debug_svg.as_deref(),
+        start_time,
     )?;
 
     println!("      Completed in {} iterations", stats.iterations_run);
@@ -118,7 +121,7 @@ fn main() -> Result<()> {
     }
 
     // Step 4: Write outputs
-    println!("\n[4/4] Writing output files...");
+    println!("\n[4/4] Writing output files... [{:.2}s]", start_time.elapsed().as_secs_f64());
 
     // Write DXF (convert back to mm)
     dxf_output::write_dxf(&args.output, &boundary, &optimized_points, diameter_m)?;
@@ -137,7 +140,7 @@ fn main() -> Result<()> {
         println!("      Voronoi SVG: {}", voronoi_path);
     }
 
-    println!("\nDone! Generated {} holes.", optimized_points.len());
+    println!("\nDone! Generated {} holes. [{:.2}s]", optimized_points.len(), start_time.elapsed().as_secs_f64());
 
     Ok(())
 }

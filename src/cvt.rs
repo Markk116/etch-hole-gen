@@ -5,6 +5,7 @@ use geo_clipper::Clipper;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 use anyhow::Result;
+use std::time::Instant;
 use crate::svg_output;
 
 /// Statistics from CVT optimization
@@ -25,6 +26,7 @@ pub fn compute_cvt(
     max_iterations: usize,
     convergence_threshold: f64,
     debug_svg_prefix: Option<&str>,
+    start_time: Instant,
 ) -> Result<(Vec<Coord<f64>>, CvtStats)> {
     let mut variance_history = Vec::new();
     let mut final_elongation = 1.0;
@@ -90,6 +92,14 @@ pub fn compute_cvt(
         } else {
             1.0
         };
+
+        // Print progress at 10% intervals
+        let print_interval = (max_iterations / 10).max(1);
+        if iter % print_interval == 0 || iter == max_iterations - 1 {
+            let avg_movement = total_movement / points.len() as f64;
+            println!("      Iter {}/{}: movement={:.2e}, variance={:.2e} [{:.2}s]",
+                iter + 1, max_iterations, avg_movement, variance, start_time.elapsed().as_secs_f64());
+        }
 
         // Debug SVG output
         if let Some(prefix) = debug_svg_prefix {
