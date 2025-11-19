@@ -39,7 +39,7 @@ pub fn compute_cvt(
             .map(|c| DelaunatorPoint { x: c.x, y: c.y })
             .collect();
 
-        let (min_pt, max_pt) = compute_bounding_box(&points);
+        let (min_pt, max_pt) = compute_bounding_box(boundary);
 
         let diagram = match VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
             Some(d) => d,
@@ -104,7 +104,7 @@ pub fn compute_cvt(
         .map(|c| DelaunatorPoint { x: c.x, y: c.y })
         .collect();
 
-    let (min_pt, max_pt) = compute_bounding_box(&points);
+    let (min_pt, max_pt) = compute_bounding_box(boundary);
 
     if let Some(diagram) = VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
         let mut final_points = Vec::new();
@@ -144,14 +144,15 @@ pub fn compute_cvt(
     Ok((points, stats))
 }
 
-fn compute_bounding_box(points: &[Coord<f64>]) -> (DelaunatorPoint, DelaunatorPoint) {
+fn compute_bounding_box(boundary: &Polygon<f64>) -> (DelaunatorPoint, DelaunatorPoint) {
+    let coords: Vec<_> = boundary.exterior().coords().collect();
     let min_pt = DelaunatorPoint {
-        x: points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
-        y: points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+        x: coords.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+        y: coords.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
     };
     let max_pt = DelaunatorPoint {
-        x: points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
-        y: points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+        x: coords.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+        y: coords.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
     };
     (min_pt, max_pt)
 }
