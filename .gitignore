@@ -12,9 +12,13 @@ Cargo.lock
 # Output files
 *.dxf
 *.svg
+*.oas
+*.gds
+*.rar
 !test_data/*.dxf
 !test_data/*.svg
 
 # OS
 .DS_Store
 Thumbs.db
+
