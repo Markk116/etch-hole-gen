@@ -233,6 +233,22 @@ fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
                     open_segments.push(coords);
                 }
             }
+            EntityType::Polyline(polyline) => {
+                let is_closed = (polyline.flags & 1) != 0;
+                let coords: Vec<Coord<f64>> = polyline.vertices()
+                    .map(|v| Coord {
+                        x: v.location.x * MM_TO_M,
+                        y: v.location.y * MM_TO_M
+                    })
+                    .collect();
+
+                if is_closed && coords.len() >= 3 {
+                    let polygon = Polygon::new(LineString::new(coords), vec![]);
+                    closed_polygons.push(polygon);
+                } else if coords.len() >= 2 {
+                    open_segments.push(coords);
+                }
+            }
             EntityType::Spline(spline) => {
                 let points = if !spline.fit_points.is_empty() {
                     &spline.fit_points
@@ -250,7 +266,7 @@ fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
                     open_segments.push(coords);
                 }
             }
-            _ => {}
+            anything => {print!("Unknown EntityType found: {:?}\n", anything)}
         }
     }
 
