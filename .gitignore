@@ -9,6 +9,9 @@ Cargo.lock
 *.swo
 *~
 
+# Input files
+top_secret/
+
 # Output files
 *.dxf
 *.svg
