@@ -6,8 +6,8 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
-/// Meters to nanometers conversion (OASIS typically uses nm)
-const M_TO_NM: f64 = 1e9;
+/// Meters to micrometer conversion (OASIS typically uses um)
+const M_TO_UM: f64 = 1e6;
 
 /// Write hole pattern to OASIS file
 ///
@@ -34,8 +34,8 @@ pub fn write_oasis(
     if include_outline {
         let boundary_pts: Vec<Point<i32>> = boundary.exterior().coords()
             .map(|c| Point::new(
-                (c.x * M_TO_NM) as i32,
-                (c.y * M_TO_NM) as i32
+                (c.x * M_TO_UM) as i32,
+                (c.y * M_TO_UM) as i32
             ))
             .collect();
 
@@ -56,8 +56,8 @@ pub fn write_oasis(
                 let x = center.x + hole_radius * angle.cos();
                 let y = center.y + hole_radius * angle.sin();
                 Point::new(
-                    (x * M_TO_NM) as i32,
-                    (y * M_TO_NM) as i32
+                    (x * M_TO_UM) as i32,
+                    (y * M_TO_UM) as i32
                 )
             })
             .collect();
