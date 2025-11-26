@@ -1,3 +1,27 @@
-/target
+# Rust build artifacts
+/target/
+Cargo.lock
 
-*sublime*
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Input files
+top_secret/
+
+# Output files
+*.dxf
+*.svg
+*.oas
+*.gds
+*.rar
+!test_data/*.dxf
+!test_data/*.svg
+
+# OS
+.DS_Store
+Thumbs.db
+

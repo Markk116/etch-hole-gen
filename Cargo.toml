@@ -1,11 +1,22 @@
 [package]
 name = "etch-hole-gen"
-version = "0.1.0"
-edition = "2024"
+version = "1.0.0"
+edition = "2021"
 
 [dependencies]
 dxf = "0.5"
 geo = "0.28"
 geo-types = "0.7"
 anyhow = "1.0"
+voronator = "0.2"
+svg = "0.14"
+geo-clipper = "0.8"
+clap = { version = "4", features = ["derive"] }
+rayon = "1.10"
+ctrlc = "3.4"
+usvg = "0.37"
+gds21 = "3.0.0-pre.2"
+libreda-oasis = "0.0"
+libreda-db = "0.0"
+geo-offset = "0.4.0"
 
