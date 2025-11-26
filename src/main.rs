@@ -6,6 +6,8 @@ mod svg_input;
 mod gds_output;
 mod oasis_output;
 
+use crate::cvt::IsolationRegion;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use dxf::entities::*;
@@ -72,9 +74,17 @@ struct Args {
     #[arg(long)]
     debug_svg: Option<String>,
 
-    /// Include boundary outline in output DXF/GDS
+    /// Include boundary outline in output
     #[arg(long)]
     include_outline: bool,
+
+    /// Include isolation region to keep HCP exact. Can be circle or square.
+    #[arg(long)]
+    include_iso_region: Option<String>,
+
+    /// Iso region size in mm. Radius for circle type, side length for square type.
+    #[arg(long)]
+    iso_region_size: Option<f64>,
 
     /// Optional GDS output file path
     #[arg(long)]
@@ -120,13 +130,43 @@ fn main() -> Result<()> {
         unit => panic!("Input unit unknown: {unit:?}"),
     };
 
+    let maybe_iso_region: Option<IsolationRegion> = match args.include_iso_region.as_deref() {
+        Some("circle") => {
+            if let Some(size) = args.iso_region_size {
+                Some(IsolationRegion::Circle {
+                    center: Coord { x: 0.0, y: 0.0 },  // Will be auto-detected from boundary centroid
+                    radius: size * MM_TO_M,
+                })
+            } else {
+                eprintln!("Warning: circle isolation region requested but no size provided");
+                None
+            }
+        }
+        Some("square") => {
+            if let Some(size) = args.iso_region_size {
+                Some(IsolationRegion::Square {
+                    center: Coord { x: 0.0, y: 0.0 },  // Will be auto-detected from boundary centroid
+                    side_length: size * MM_TO_M,
+                })
+            } else {
+                eprintln!("Warning: square isolation region requested but no size provided");
+                None
+            }
+        }
+        Some(unknown) => {
+            eprintln!("Warning: unknown isolation region type '{}', ignoring", unknown);
+            None
+        }
+        None => None,
+    };
 
     // Print header
     println!("Etch Hole Pattern Generator");
     println!("===========================\n");
-    println!("Input:  {}", args.input);
+    println!("Input:      {}", args.input);
     println!("Input Unit: {}", &input_unit);
-    println!("Output: {}", args.output);
+    println!("Output:     {}", args.output);
+
     println!("\nParameters:");
     println!("  Pitch:      {:.2} um ({:.3e} m)", args.pitch, pitch_m);
     println!("  Diameter:   {:.2} um ({:.3e} m)", args.diameter, diameter_m);
@@ -186,6 +226,8 @@ fn main() -> Result<()> {
         args.debug_svg.as_deref(),
         start_time,
         &interrupted,
+        maybe_iso_region,
+        pitch_m
     )?;
 
     println!("      Completed in {} iterations", stats.iterations_run);

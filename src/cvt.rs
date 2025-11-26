@@ -11,6 +11,43 @@ use std::time::Instant;
 use rayon::prelude::*;
 use crate::svg_output;
 
+/// Defines an isolation region where points are frozen during CVT optimization
+///
+/// Points within the isolation region are classified as either:
+/// - **Internal points**: Points more than 2×pitch from the region boundary (completely excluded from Voronoi computation)
+/// - **Rim points**: Points within 2×pitch of the region boundary (frozen but included in Voronoi to maintain proper tessellation)
+///
+/// This provides significant performance improvements by reducing the number of points
+/// that need to be processed in each CVT iteration.
+#[derive(Debug, Clone)]
+pub enum IsolationRegion {
+    /// Circular isolation region
+    Circle { 
+        /// Center point of the circle (in meters)
+        center: Coord<f64>, 
+        /// Radius of the circle (in meters)
+        radius: f64 
+    },
+    /// Square isolation region  
+    Square { 
+        /// Center point of the square (in meters)
+        center: Coord<f64>, 
+        /// Side length of the square (in meters)
+        side_length: f64 
+    }
+}
+
+/// Classification of points relative to an isolation region
+#[derive(Debug)]
+struct PointClassification {
+    /// Points fully inside the isolation region (excluded from Voronoi computation)
+    internal: Vec<(usize, Coord<f64>)>,
+    /// Points near the isolation region boundary (frozen but included in Voronoi)
+    rim: Vec<(usize, Coord<f64>)>,
+    /// Points outside the isolation region (actively optimized)
+    active: Vec<(usize, Coord<f64>)>,
+}
+
 /// Statistics from CVT optimization
 #[derive(Debug, Clone)]
 pub struct CvtStats {
@@ -23,31 +60,126 @@ pub struct CvtStats {
 /// Compute Centroidal Voronoi Tessellation using Lloyd's algorithm
 ///
 /// All coordinates should be in meters (SI base unit).
+///
+/// # Parameters
+///
+/// - `points`: Initial point positions to optimize
+/// - `boundary`: Bounding polygon that constrains the tessellation
+/// - `max_iterations`: Maximum number of Lloyd iterations to perform
+/// - `convergence_threshold`: Stop when average point movement falls below this value (in meters)
+/// - `debug_svg_prefix`: Optional prefix for debug SVG output files
+/// - `start_time`: Start time for progress reporting
+/// - `interrupted`: Atomic flag to allow early termination
+/// - `isolation_region`: Optional region where points are frozen (not moved during optimization)
+/// - `pitch`: Characteristic spacing between points (in meters), used to define rim width (2×pitch)
+///
+/// # Isolation Region Optimization
+///
+/// When an `isolation_region` is provided, points are classified into three categories:
+///
+/// 1. **Internal points** (> 2×pitch from region boundary): Completely excluded from computation,
+///    stored separately and merged back before returning. This provides the main performance benefit.
+///
+/// 2. **Rim points** (within 2×pitch of region boundary): Frozen in place but included in the
+///    Voronoi diagram computation to ensure proper tessellation at the region boundary.
+///
+/// 3. **Active points** (outside region): These are the only points that move during optimization.
+///
+/// The isolation region center is automatically set to the boundary's centroid.
+///
+/// # Returns
+///
+/// Returns optimized point positions and statistics about the optimization process.
 pub fn compute_cvt(
-    mut points: Vec<Coord<f64>>,
+    points: Vec<Coord<f64>>,
     boundary: &Polygon<f64>,
     max_iterations: usize,
     convergence_threshold: f64,
     debug_svg_prefix: Option<&str>,
     start_time: Instant,
     interrupted: &Arc<AtomicBool>,
+    isolation_region: Option<IsolationRegion>,
+    pitch: f64,
 ) -> Result<(Vec<Coord<f64>>, CvtStats)> {
     let mut variance_history = Vec::new();
     let mut final_elongation = 1.0;
     let mut iterations_run = 0;
 
+    // Classify points if isolation region is provided
+    let classification = if let Some(ref region) = isolation_region {
+        // Auto-detect center from boundary centroid if needed
+        let region_with_center = match region {
+            IsolationRegion::Circle { center, radius } => {
+                let auto_center = compute_polygon_centroid(boundary).unwrap_or(*center);
+                IsolationRegion::Circle { center: auto_center, radius: *radius }
+            }
+            IsolationRegion::Square { center, side_length } => {
+                let auto_center = compute_polygon_centroid(boundary).unwrap_or(*center);
+                IsolationRegion::Square { center: auto_center, side_length: *side_length }
+            }
+        };
+        
+        Some((classify_points(&points, &region_with_center, pitch), region_with_center))
+    } else {
+        None
+    };
+
+    // Extract working point set and store internal points
+    let (mut working_points, internal_points, rim_indices) = if let Some((ref class, _)) = classification {
+        // Build working set: rim + active points (preserving their indices for lookup)
+        let mut working = Vec::new();
+        let mut rim_idx_set = std::collections::HashSet::new();
+        
+        // Add rim points first
+        for (_original_idx, point) in &class.rim {
+            working.push(*point);
+            rim_idx_set.insert(working.len() - 1);
+        }
+        
+        // Add active points
+        for (_original_idx, point) in &class.active {
+            working.push(*point);
+        }
+        
+        (working, class.internal.clone(), rim_idx_set)
+    } else {
+        // No isolation region - all points are active
+        (points, Vec::new(), std::collections::HashSet::new())
+    };
+
     // Output initial state before optimization
     if let Some(prefix) = debug_svg_prefix {
         let debug_path = format!("{}_init.svg", prefix);
         let scale = 1e6;
-        let _ = svg_output::write_voronoi_svg(&debug_path, boundary, &points, scale);
+        
+        let (iso_circle, iso_square, internal, rim, active) = if let Some((ref class, ref region)) = classification {
+            let (circle, square) = match region {
+                IsolationRegion::Circle { center, radius } => (Some((*center, *radius)), None),
+                IsolationRegion::Square { center, side_length } => (None, Some((*center, *side_length))),
+            };
+            (circle, square, class.internal.as_slice(), class.rim.as_slice(), class.active.as_slice())
+        } else {
+            (None, None, &[][..], &[][..], &[][..])
+        };
+        
+        let _ = svg_output::write_voronoi_svg_with_classification(
+            &debug_path,
+            boundary,
+            &working_points,
+            scale,
+            iso_circle,
+            iso_square,
+            internal,
+            rim,
+            active,
+        );
     }
 
     for iter in 0..max_iterations {
         iterations_run = iter + 1;
 
-        // Build Voronoi diagram
-        let voronoi_points: Vec<DelaunatorPoint> = points
+        // Build Voronoi diagram from working points
+        let voronoi_points: Vec<DelaunatorPoint> = working_points
             .iter()
             .map(|c| DelaunatorPoint { x: c.x, y: c.y })
             .collect();
@@ -59,11 +191,25 @@ pub fn compute_cvt(
             None => break,
         };
 
-        // Compute new centroids in parallel
-        let results: Vec<(Coord<f64>, f64, f64, f64)> = (0..points.len())
+        // Compute new centroids in parallel, but freeze rim points
+        let results: Vec<(Coord<f64>, f64, f64, f64)> = (0..working_points.len())
             .into_par_iter()
             .map(|i| {
-                let old_point = points[i];
+                let old_point = working_points[i];
+                
+                // Check if this is a rim point (frozen)
+                if rim_indices.contains(&i) {
+                    let cell = get_voronoi_cell(&diagram, i, boundary);
+                    let area = polygon_area(&cell);
+                    let elongation = if let Some(centroid) = compute_polygon_centroid(&cell) {
+                        compute_cell_elongation(&cell, &centroid)
+                    } else {
+                        1.0
+                    };
+                    return (old_point, 0.0, area, elongation);
+                }
+                
+                // Active point - compute new position
                 let cell = get_voronoi_cell(&diagram, i, boundary);
 
                 if let Some(centroid) = compute_polygon_centroid(&cell) {
@@ -97,7 +243,7 @@ pub fn compute_cvt(
             cell_elongations.push(elongation);
         }
 
-        points = new_points;
+        working_points = new_points;
 
         // Track metrics
         let variance = compute_variance(&cell_areas);
@@ -112,7 +258,7 @@ pub fn compute_cvt(
         // Print progress at 10% intervals
         let print_interval = (max_iterations / 10).max(1);
         if iter % print_interval == 0 || iter == max_iterations - 1 {
-            let avg_movement = total_movement / points.len() as f64;
+            let avg_movement = total_movement / working_points.len() as f64;
             println!("      Iter {}/{}: movement={:.2e}, variance={:.2e} [{:.2}s]",
                 iter + 1, max_iterations, avg_movement, variance, start_time.elapsed().as_secs_f64());
         }
@@ -120,12 +266,33 @@ pub fn compute_cvt(
         // Debug SVG output
         if let Some(prefix) = debug_svg_prefix {
             let debug_path = format!("{}_{:04}.svg", prefix, iter);
-            let scale = 1e6; // Scale up for visibility (m to um scale)
-            let _ = svg_output::write_voronoi_svg(&debug_path, boundary, &points, scale);
+            let scale = 1e6;
+            
+            let (iso_circle, iso_square, internal, rim, active) = if let Some((ref class, ref region)) = classification {
+                let (circle, square) = match region {
+                    IsolationRegion::Circle { center, radius } => (Some((*center, *radius)), None),
+                    IsolationRegion::Square { center, side_length } => (None, Some((*center, *side_length))),
+                };
+                (circle, square, class.internal.as_slice(), class.rim.as_slice(), class.active.as_slice())
+            } else {
+                (None, None, &[][..], &[][..], &[][..])
+            };
+            
+            let _ = svg_output::write_voronoi_svg_with_classification(
+                &debug_path,
+                boundary,
+                &working_points,
+                scale,
+                iso_circle,
+                iso_square,
+                internal,
+                rim,
+                active,
+            );
         }
 
         // Check convergence
-        let avg_movement = total_movement / points.len() as f64;
+        let avg_movement = total_movement / working_points.len() as f64;
         if avg_movement < convergence_threshold {
             break;
         }
@@ -137,48 +304,22 @@ pub fn compute_cvt(
         }
     }
 
-    // Final centroid snap
-    let voronoi_points: Vec<DelaunatorPoint> = points
-        .iter()
-        .map(|c| DelaunatorPoint { x: c.x, y: c.y })
-        .collect();
-
-    let (min_pt, max_pt) = compute_bounding_box(boundary);
-
-    if let Some(diagram) = VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
-        // Final snap in parallel
-        let results: Vec<(Coord<f64>, f64)> = (0..points.len())
-            .into_par_iter()
-            .map(|i| {
-                let cell = get_voronoi_cell(&diagram, i, boundary);
-
-                if let Some(centroid) = compute_polygon_centroid(&cell) {
-                    if boundary.contains(&centroid) {
-                        let elongation = compute_cell_elongation(&cell, &centroid);
-                        (centroid, elongation)
-                    } else {
-                        (points[i], 1.0)
-                    }
-                } else {
-                    (points[i], 1.0)
-                }
-            })
-            .collect();
-
-        let mut final_points = Vec::with_capacity(results.len());
-        let mut elongations = Vec::with_capacity(results.len());
-
-        for (point, elongation) in results {
-            final_points.push(point);
-            elongations.push(elongation);
+    // Merge internal points back with working points
+    let final_points = if let Some((ref _class, _)) = classification {
+        let mut result = Vec::with_capacity(internal_points.len() + working_points.len());
+        
+        // Merge all points back (order doesn't matter as long as we don't lose any)
+        for (_idx, point) in &internal_points {
+            result.push(*point);
         }
-
-        points = final_points;
-
-        if !elongations.is_empty() {
-            final_elongation = elongations.iter().sum::<f64>() / elongations.len() as f64;
+        for point in &working_points {
+            result.push(*point);
         }
-    }
+        
+        result
+    } else {
+        working_points
+    };
 
     let stats = CvtStats {
         iterations_run,
@@ -187,7 +328,7 @@ pub fn compute_cvt(
         final_elongation,
     };
 
-    Ok((points, stats))
+    Ok((final_points, stats))
 }
 
 pub fn compute_bounding_box(boundary: &Polygon<f64>) -> (DelaunatorPoint, DelaunatorPoint) {
@@ -341,4 +482,79 @@ fn compute_cell_elongation(cell: &Polygon<f64>, centroid: &Coord<f64>) -> f64 {
 
 fn distance(p1: &Coord<f64>, p2: &Coord<f64>) -> f64 {
     ((p2.x - p1.x).powi(2) + (p2.y - p1.y).powi(2)).sqrt()
+}
+
+/// Check if a point is inside an isolation region
+fn point_in_isolation_region(point: &Coord<f64>, region: &IsolationRegion) -> bool {
+    match region {
+        IsolationRegion::Circle { center, radius } => {
+            distance(point, center) <= *radius
+        }
+        IsolationRegion::Square { center, side_length } => {
+            let half_side = side_length / 2.0;
+            (point.x - center.x).abs() <= half_side && (point.y - center.y).abs() <= half_side
+        }
+    }
+}
+
+/// Compute distance from a point to the boundary of an isolation region
+///
+/// Returns positive distance if outside, negative if inside
+fn distance_from_isolation_boundary(point: &Coord<f64>, region: &IsolationRegion) -> f64 {
+    match region {
+        IsolationRegion::Circle { center, radius } => {
+            radius - distance(point, center)
+        }
+        IsolationRegion::Square { center, side_length } => {
+            let half_side = side_length / 2.0;
+            let dx = (point.x - center.x).abs();
+            let dy = (point.y - center.y).abs();
+            
+            // Distance to nearest edge
+            let dist_x = half_side - dx;
+            let dist_y = half_side - dy;
+            
+            dist_x.min(dist_y)
+        }
+    }
+}
+
+/// Classify points into internal, rim, and active sets based on isolation region
+///
+/// - **Internal**: Points more than 2×pitch inside the region boundary
+/// - **Rim**: Points within 2×pitch of the region boundary  
+/// - **Active**: Points outside the isolation region
+fn classify_points(
+    points: &[Coord<f64>],
+    region: &IsolationRegion,
+    pitch: f64,
+) -> PointClassification {
+    let rim_width = 2.0 * pitch;
+    
+    let mut internal = Vec::new();
+    let mut rim = Vec::new();
+    let mut active = Vec::new();
+    
+    for (idx, point) in points.iter().enumerate() {
+        if point_in_isolation_region(point, region) {
+            let dist_from_boundary = distance_from_isolation_boundary(point, region);
+            
+            if dist_from_boundary > rim_width {
+                // Deep inside the isolation region
+                internal.push((idx, *point));
+            } else {
+                // Near the boundary - include in Voronoi but freeze
+                rim.push((idx, *point));
+            }
+        } else {
+            // Outside isolation region - actively optimize
+            active.push((idx, *point));
+        }
+    }
+    
+    PointClassification {
+        internal,
+        rim,
+        active,
+    }
 }
