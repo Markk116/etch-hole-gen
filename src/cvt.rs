@@ -190,7 +190,7 @@ pub fn compute_cvt(
     Ok((points, stats))
 }
 
-fn compute_bounding_box(boundary: &Polygon<f64>) -> (DelaunatorPoint, DelaunatorPoint) {
+pub fn compute_bounding_box(boundary: &Polygon<f64>) -> (DelaunatorPoint, DelaunatorPoint) {
     let coords: Vec<_> = boundary.exterior().coords().collect();
     let min_pt = DelaunatorPoint {
         x: coords.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),

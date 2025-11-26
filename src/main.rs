@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 /// Unit conversion constants
+const NM_TO_M: f64 = 1e-9;  // nanometers to meters
 const UM_TO_M: f64 = 1e-6;  // micrometers to meters
 const MM_TO_M: f64 = 1e-3;  // millimeters to meters
 
@@ -39,7 +40,7 @@ struct Args {
     #[arg(short, long, default_value_t = 1.0)]
     diameter: f64,
 
-    /// Edge clearance in micrometers (defaults to pitch if not specified)
+    /// Edge clearance in micrometers (defaults to pitch/2 if not specified)
     #[arg(short, long)]
     clearance: Option<f64>,
 
@@ -50,6 +51,10 @@ struct Args {
     /// Convergence threshold in meters
     #[arg(short, long, default_value_t = 1e-9)]
     threshold: f64,
+
+    /// Input file unit, only important for dxf files
+    #[arg(short='u', long, default_value = "mm")]
+    input_file_unit: String,
 
     /// Output DXF file path
     #[arg(short, long, default_value = "output.dxf")]
@@ -97,10 +102,22 @@ fn main() -> Result<()> {
     let diameter_m = args.diameter * UM_TO_M;
     let clearance_m = args.clearance.map(|c| c * UM_TO_M).unwrap_or(pitch_m/2.0);
 
+    // Scale input 
+    let input_unit = args.input_file_unit;
+    let input_scale = match input_unit.as_str() {
+        "m" => 1.,
+        "mm" => MM_TO_M,
+        "um" => UM_TO_M,
+        "nm" => NM_TO_M,
+        unit => panic!("Input unit unknown: {unit:?}"),
+    };
+
+
     // Print header
     println!("Etch Hole Pattern Generator");
     println!("===========================\n");
     println!("Input:  {}", args.input);
+    println!("Input Unit: {}", &input_unit);
     println!("Output: {}", args.output);
     println!("\nParameters:");
     println!("  Pitch:      {:.2} um ({:.3e} m)", args.pitch, pitch_m);
@@ -125,13 +142,17 @@ fn main() -> Result<()> {
         "dxf" | _ => {
             let drawing = Drawing::load_file(&args.input)
                 .context("Failed to load DXF file")?;
-            extract_boundary_from_dxf(&drawing)?
+            extract_boundary_from_dxf(&drawing, &input_scale)?
         }
     };
 
     let vertex_count = boundary.exterior().coords().count();
     println!("      Loaded boundary with {} vertices", vertex_count);
-
+    let bounding_box = cvt::compute_bounding_box(&boundary);
+    let diff_x = bounding_box.1.x - bounding_box.0.x;
+    let diff_y = bounding_box.1.y - bounding_box.0.y;
+    println!("      Bounding box size: {0:.3}mm by {1:.3}mm", diff_x*1000., diff_y*1000.);
+    
     // Step 2: Generate initial HCP grid
     println!("\n[2/4] Generating HCP grid... [{:.2}s]", start_time.elapsed().as_secs_f64());
     let initial_points = hcp_grid::generate_hcp_grid(&boundary, pitch_m, clearance_m);
@@ -211,7 +232,7 @@ fn main() -> Result<()> {
 }
 
 /// Extract the membrane boundary polygon from a DXF drawing
-fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
+fn extract_boundary_from_dxf(drawing: &Drawing, scale_factor: &f64) -> Result<Polygon<f64>> {
     let mut closed_polygons = Vec::new();
     let mut open_segments: Vec<Vec<Coord<f64>>> = Vec::new();
 
@@ -221,8 +242,8 @@ fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
                 let is_closed = (polyline.flags & 1) != 0;
                 let coords: Vec<Coord<f64>> = polyline.vertices.iter()
                     .map(|v| Coord {
-                        x: v.x * MM_TO_M,
-                        y: v.y * MM_TO_M
+                        x: v.x * scale_factor,
+                        y: v.y * scale_factor
                     })
                     .collect();
 
@@ -237,8 +258,8 @@ fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
                 let is_closed = (polyline.flags & 1) != 0;
                 let coords: Vec<Coord<f64>> = polyline.vertices()
                     .map(|v| Coord {
-                        x: v.location.x * MM_TO_M,
-                        y: v.location.y * MM_TO_M
+                        x: v.location.x * scale_factor,
+                        y: v.location.y * scale_factor
                     })
                     .collect();
 
@@ -259,8 +280,8 @@ fn extract_boundary_from_dxf(drawing: &Drawing) -> Result<Polygon<f64>> {
                 if points.len() >= 2 {
                     let coords: Vec<Coord<f64>> = points.iter()
                         .map(|p| Coord {
-                            x: p.x * MM_TO_M,
-                            y: p.y * MM_TO_M
+                            x: p.x * scale_factor,
+                            y: p.y * scale_factor
                         })
                         .collect();
                     open_segments.push(coords);
