@@ -1,7 +1,7 @@
 use geo::{Coord, Polygon, LineString, MultiPolygon};
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
-use geo_clipper::Clipper;
+use geo_clipper::{Clipper, EndType, JoinType};
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 use anyhow::Result;
@@ -65,6 +65,7 @@ pub struct CvtStats {
 ///
 /// - `points`: Initial point positions to optimize
 /// - `boundary`: Bounding polygon that constrains the tessellation
+/// - `clearance`: Minimum distance points must maintain from the boundary (in meters). Use 0.0 for no clearance.
 /// - `max_iterations`: Maximum number of Lloyd iterations to perform
 /// - `convergence_threshold`: Stop when average point movement falls below this value (in meters)
 /// - `debug_svg_prefix`: Optional prefix for debug SVG output files
@@ -93,6 +94,7 @@ pub struct CvtStats {
 pub fn compute_cvt(
     points: Vec<Coord<f64>>,
     boundary: &Polygon<f64>,
+    clearance: f64,
     max_iterations: usize,
     convergence_threshold: f64,
     debug_svg_prefix: Option<&str>,
@@ -105,16 +107,51 @@ pub fn compute_cvt(
     let mut final_elongation = 1.0;
     let mut iterations_run = 0;
 
+    // Create shrunk boundary if clearance is specified
+    let working_boundary = if clearance > 0.0 {
+        // Use Clipper::offset with negative clearance to shrink the boundary inward
+        // Scale factor for geo-clipper (works with integers internally)
+        let scale_factor = 1e9;
+        
+        // Clipper::offset parameters:
+        // - delta: the offset distance (negative = inward)
+        // - join_type: how to join offset lines (Miter for sharp corners)
+        // - end_type: how to handle endpoints (ClosedPolygon for polygons)
+        // - miter_limit: maximum distance for miter joins (2.0 is reasonable default)
+        let offset_result = boundary.offset(
+            -clearance,
+            JoinType::Miter(1e-9),
+            EndType::ClosedPolygon,
+            scale_factor,
+        );
+        
+        // The offset operation returns a MultiPolygon, take the largest one
+        if let Some(largest) = offset_result.0.into_iter()
+            .max_by(|a, b| {
+                let area_a = polygon_area(a);
+                let area_b = polygon_area(b);
+                area_a.partial_cmp(&area_b).unwrap_or(std::cmp::Ordering::Equal)
+            }) {
+            largest
+        } else {
+            // If offset produced no polygons, fall back to original boundary
+            eprintln!("Warning: clearance offset produced no polygons, using original boundary");
+            boundary.clone()
+        }
+    } else {
+        boundary.clone()
+    };
+
     // Classify points if isolation region is provided
     let classification = if let Some(ref region) = isolation_region {
         // Auto-detect center from boundary centroid if needed
         let region_with_center = match region {
             IsolationRegion::Circle { center, radius } => {
-                let auto_center = compute_polygon_centroid(boundary).unwrap_or(*center);
+                let auto_center = compute_polygon_centroid(&working_boundary).unwrap_or(*center);
                 IsolationRegion::Circle { center: auto_center, radius: *radius }
             }
             IsolationRegion::Square { center, side_length } => {
-                let auto_center = compute_polygon_centroid(boundary).unwrap_or(*center);
+                let auto_center = compute_polygon_centroid(&working_boundary).unwrap_or(*center);
                 IsolationRegion::Square { center: auto_center, side_length: *side_length }
             }
         };
@@ -184,7 +221,7 @@ pub fn compute_cvt(
             .map(|c| DelaunatorPoint { x: c.x, y: c.y })
             .collect();
 
-        let (min_pt, max_pt) = compute_bounding_box(boundary);
+        let (min_pt, max_pt) = compute_bounding_box(&working_boundary);
 
         let diagram = match VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
             Some(d) => d,
@@ -199,7 +236,7 @@ pub fn compute_cvt(
                 
                 // Check if this is a rim point (frozen)
                 if rim_indices.contains(&i) {
-                    let cell = get_voronoi_cell(&diagram, i, boundary);
+                    let cell = get_voronoi_cell(&diagram, i, &working_boundary);
                     let area = polygon_area(&cell);
                     let elongation = if let Some(centroid) = compute_polygon_centroid(&cell) {
                         compute_cell_elongation(&cell, &centroid)
@@ -210,10 +247,10 @@ pub fn compute_cvt(
                 }
                 
                 // Active point - compute new position
-                let cell = get_voronoi_cell(&diagram, i, boundary);
+                let cell = get_voronoi_cell(&diagram, i, &working_boundary);
 
                 if let Some(centroid) = compute_polygon_centroid(&cell) {
-                    if boundary.contains(&centroid) {
+                    if working_boundary.contains(&centroid) {
                         let movement = distance(&old_point, &centroid);
                         let area = polygon_area(&cell);
                         let elongation = compute_cell_elongation(&cell, &centroid);

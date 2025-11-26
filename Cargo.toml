@@ -18,4 +18,5 @@ usvg = "0.37"
 gds21 = "3.0.0-pre.2"
 libreda-oasis = "0.0"
 libreda-db = "0.0"
+geo-offset = "0.4.0"
 

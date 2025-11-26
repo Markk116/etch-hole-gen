@@ -221,6 +221,7 @@ fn main() -> Result<()> {
     let (optimized_points, stats) = cvt::compute_cvt(
         initial_points,
         &boundary,
+        clearance_m,
         args.iterations,
         args.threshold,
         args.debug_svg.as_deref(),
