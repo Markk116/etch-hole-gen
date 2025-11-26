@@ -83,6 +83,10 @@ struct Args {
     /// Optional OASIS output file path
     #[arg(long)]
     oasis: Option<String>,
+
+    /// Optional override point-limit break of 10 million points
+    #[arg(long)]
+    override_point_limit: bool,
 }
 
 fn main() -> Result<()> {
@@ -93,8 +97,12 @@ fn main() -> Result<()> {
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_clone = interrupted.clone();
     ctrlc::set_handler(move || {
+        if interrupted_clone.load(Ordering::SeqCst) {
+            eprintln!("\nSecond interrupt received, exiting immediately!");
+            std::process::exit(130); // 128 + SIGINT(2)
+        }
         interrupted_clone.store(true, Ordering::SeqCst);
-        eprintln!("\nInterrupt received, finishing current iteration...");
+        eprintln!("\nInterrupt received, finishing current iteration... (press Ctrl-C again to force exit)");
     }).expect("Error setting Ctrl-C handler");
 
     // Convert user input from micrometers to meters (SI base unit)
@@ -152,7 +160,13 @@ fn main() -> Result<()> {
     let diff_x = bounding_box.1.x - bounding_box.0.x;
     let diff_y = bounding_box.1.y - bounding_box.0.y;
     println!("      Bounding box size: {0:.3}mm by {1:.3}mm", diff_x*1000., diff_y*1000.);
-    
+
+    let max_points = (diff_x * diff_y / (pitch_m * pitch_m)).floor();
+    println!("      Initial grid may contain up to {} points.", max_points);
+    if max_points > 10e6 && !args.override_point_limit {
+        panic!("\nThat's too many points. Add flag '--override-point-limit' to do it anyway.")
+    }
+
     // Step 2: Generate initial HCP grid
     println!("\n[2/4] Generating HCP grid... [{:.2}s]", start_time.elapsed().as_secs_f64());
     let initial_points = hcp_grid::generate_hcp_grid(&boundary, pitch_m, clearance_m);
