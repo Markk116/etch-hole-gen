@@ -14,8 +14,8 @@ use crate::svg_output;
 /// Defines an isolation region where points are frozen during CVT optimization
 ///
 /// Points within the isolation region are classified as either:
-/// - **Internal points**: Points more than 2×pitch from the region boundary (completely excluded from Voronoi computation)
-/// - **Rim points**: Points within 2×pitch of the region boundary (frozen but included in Voronoi to maintain proper tessellation)
+/// - Internal points: Points more than 2×pitch from the region boundary (completely excluded from Voronoi computation)
+/// - Rim points: Points within 2×pitch of the region boundary (frozen but included in Voronoi to maintain proper tessellation)
 ///
 /// This provides significant performance improvements by reducing the number of points
 /// that need to be processed in each CVT iteration.
@@ -78,13 +78,13 @@ pub struct CvtStats {
 ///
 /// When an `isolation_region` is provided, points are classified into three categories:
 ///
-/// 1. **Internal points** (> 2×pitch from region boundary): Completely excluded from computation,
+/// 1. Internal points** (> 2×pitch from region boundary): Completely excluded from computation,
 ///    stored separately and merged back before returning. This provides the main performance benefit.
 ///
-/// 2. **Rim points** (within 2×pitch of region boundary): Frozen in place but included in the
+/// 2. Rim points** (within 2×pitch of region boundary): Frozen in place but included in the
 ///    Voronoi diagram computation to ensure proper tessellation at the region boundary.
 ///
-/// 3. **Active points** (outside region): These are the only points that move during optimization.
+/// 3. Active points** (outside region): These are the only points that move during optimization.
 ///
 /// The isolation region center is automatically set to the boundary's centroid.
 ///
@@ -558,9 +558,9 @@ fn distance_from_isolation_boundary(point: &Coord<f64>, region: &IsolationRegion
 
 /// Classify points into internal, rim, and active sets based on isolation region
 ///
-/// - **Internal**: Points more than 2×pitch inside the region boundary
-/// - **Rim**: Points within 2×pitch of the region boundary  
-/// - **Active**: Points outside the isolation region
+/// - Internal: Points more than 2×pitch inside the region boundary
+/// - Rim: Points within 2×pitch of the region boundary  
+/// - Active: Points outside the isolation region
 fn classify_points(
     points: &[Coord<f64>],
     region: &IsolationRegion,

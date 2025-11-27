@@ -1,158 +1,135 @@
 # Etch Hole Pattern Generator
 
-Generate optimized hole patterns for nanomechanical resonator fabrication using **Centroidal Voronoi Tessellation (CVT)**.
+Generate optimized hole patterns for nanomechanical resonator fabrication. Takes a DXF or SVG outline and fills it with uniformly distributed etch holes.
 
-## Overview
-
-This tool generates uniform etch hole distributions for suspended membrane structures. The holes enable uniform material removal during the undercutting process, which is critical for minimizing stress concentrations and achieving even etching.
-
-**Algorithm:** Lloyd's algorithm for CVT optimization, starting from a hexagonal close-packed (HCP) seed grid.
-
-## Features
-
-- ✅ DXF file I/O for CAD integration
-- ✅ Automatic polygon reconstruction from broken paths (Inkscape-compatible)
-- ✅ HCP grid initialization
-- ✅ CVT optimization using Lloyd's algorithm
-- ✅ Convergence metrics and tracking
-- ✅ DXF output with boundary and hole layers
-- ✅ SVG visualization export
-
-## Installation
+## Quick Start
 
 ```bash
 cargo build --release
-```
 
-The binary will be available at `target/release/etch-hole-gen`.
+# Basic usage (2μm pitch, 1μm diameter holes)
+./target/release/etch-hole-gen input.dxf -o output.dxf
+
+# With visualization
+./target/release/etch-hole-gen input.dxf -o output.dxf --svg preview.svg
+
+# Custom parameters
+./target/release/etch-hole-gen input.dxf \
+    --pitch 2.5 --diameter 1.2 --clearance 0.8 \
+    --iterations 100 -o output.dxf
+```
 
 ## Usage
 
+```
+etch-hole-gen [OPTIONS] <INPUT>
+```
+
+**Input formats:** DXF, SVG (must contain closed polygon defining boundary)
+
+**Units:** Pitch, diameter, and clearance are specified in micrometers. Input file units default to millimeters (use `--input-file-unit` for DXF files in other units).
+
+**Viewing the output**: To view the output, especially in oasis format, [KLayout](https://www.klayout.de/) is highly recommended. 
+
+## About
+
+Developed at TU Delft for nanomechanical resonator fabrication. 
+
+## Options
+
+### Geometry
+- `-p, --pitch <PITCH>` - Hole pitch in μm (default: 2)
+- `-d, --diameter <DIAMETER>` - Hole diameter in μm (default: 1)
+- `-c, --clearance <CLEARANCE>` - Edge clearance in μm (default: pitch/2)
+
+### Algorithm
+- `-i, --iterations <ITERATIONS>` - Maximum optimization iterations (default: 50)
+- `-t, --threshold <THRESHOLD>` - Convergence threshold in meters, on motion between iterations (default: 1e-9)
+
+### Input/Output
+- `-u, --input-file-unit <UNIT>` - Input file unit for DXF: m, mm, um, nm (default: mm)
+- `-o, --output <PATH>` - Output DXF file (default: output.dxf)
+- `--include-outline` - Include boundary outline in output file
+
+### Optional Outputs
+- `--svg <PATH>` - Generate SVG visualization
+- `--voronoi-svg <PATH>` - Generate Voronoi diagram visualization
+- `--debug-svg <PREFIX>` - Output SVG at each iteration (e.g., `debug_` → `debug_000.svg`, `debug_001.svg`, ...)
+- `--gds <PATH>` - Generate GDS file
+- `--oasis <PATH>` - Generate OASIS file
+
+### Advanced
+- `--include-iso-region <TYPE>` - Keep exact HCP pattern in central region (circle or square)
+- `--iso-region-size <SIZE>` - Isolation region size in mm (radius for circle, side length for square)
+- `--override-point-limit` - Allow more than 10 million points
+
+The 10 million point limit is to protect against the case of generating billions of points when the wrong input unit is specified. 
+
+At any point hitting `ctrl+c` once let's the current iteration finish and then output whatever results it got. Repeating it aborts the program. 
+
+## Output Formats
+
+**DXF**: Boundary on `BOUNDARY` layer, holes as circles on `HOLES` layer
+
+**GDS/OASIS**: Boundary on layer 1, holes as circles on layer 2
+
+**SVG**: Visual preview (boundary in black, holes in red)
+
+## Examples
+
+Standard 2mm × 2mm membrane with 2μm pitch:
 ```bash
-./etch-hole-gen <input.dxf> [options]
+./etch-hole-gen device.dxf --pitch 2 --diameter 1 -o device_holes.dxf
 ```
 
-### Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--pitch <value>` | Hole pitch (center-to-center spacing) | 2.0 |
-| `--diameter <value>` | Hole diameter | 1.0 |
-| `--iterations <value>` | Maximum CVT iterations | 50 |
-| `--threshold <value>` | Convergence threshold | 0.001 |
-| `--output <path>` | Output DXF file path | output.dxf |
-| `--svg <path>` | Optional SVG visualization | none |
-
-**Note:** All dimensional units (pitch, diameter) must match the units used in your input DXF file. For example, if your DXF uses millimeters, specify pitch in millimeters.
-
-### Examples
-
-**Standard nanomechanical resonator (2mm membrane, 2μm pitch):**
+High-density pattern with GDS output:
 ```bash
-# If DXF is in mm, use mm for pitch/diameter
-./etch-hole-gen device.dxf --pitch 0.002 --diameter 0.001 \
-    --iterations 50 --output device_with_holes.dxf --svg preview.svg
+./etch-hole-gen device.dxf --pitch 1.5 --diameter 0.8 \
+    --clearance 0.5 --iterations 100 \
+    -o device_holes.dxf --gds device_holes.gds
 ```
 
-**Test with included test frame:**
+With exact HCP in center (no optimization artifacts):
 ```bash
-./etch-hole-gen test_data/test_frame.dxf \
-    --pitch 0.2 --diameter 0.05 --iterations 30 \
-    --output output.dxf --svg output.svg
+./etch-hole-gen device.dxf --pitch 2 --diameter 1 \
+    --include-iso-region circle --iso-region-size 0.5 \
+    -o device_holes.dxf
 ```
 
-## Input Format
-
-**DXF Requirements:**
-- File must contain at least one closed polygon (or path segments that can be assembled)
-- The polygon defines the membrane + tether outline
-- Units should be consistent (typically millimeters)
-
-**Tip:** If exporting from Inkscape, the tool can automatically reconstruct closed polygons from broken path segments.
-
-## Output Format
-
-**DXF Output:**
-- Layer `BOUNDARY`: Original membrane/tether outline (LWPOLYLINE)
-- Layer `HOLES`: Optimized hole pattern (CIRCLE entities)
-
-**SVG Output (optional):**
-- Visual preview with boundary (black) and holes (red, semi-transparent)
-- Useful for quick inspection before fabrication
-
-## Algorithm Details
-
-### 1. HCP Grid Seeding
-Generates initial hexagonal close-packed point distribution inside the boundary polygon.
-
-### 2. Lloyd's Algorithm (CVT)
-Iteratively:
-1. Compute Voronoi diagram for current points
-2. Calculate centroid of each Voronoi cell
-3. Move each point to its cell's centroid
-4. Repeat until convergence
-
-**Convergence:** Stops when average point movement falls below threshold or max iterations reached.
-
-**Metrics:** Tracks variance of Voronoi cell areas (lower = more uniform).
-
-### 3. DXF Generation
-Writes boundary and optimized hole positions to DXF file with proper layers.
-
-## Performance
-
-- ~1 million points: Minutes to hours (single-threaded)
-- ~4,000 points: ~1-2 seconds for 30 iterations
-- ~268 points: Sub-second
-
-**Typical convergence:** 20-50 iterations
-
-## Example Results
-
-Test run with `test_frame.dxf` (4mm × 4mm geometry):
-- 268 points at 0.2mm pitch
-- 30 iterations in <1 second
-- **44% improvement** in cell area variance
-- Final variance: 0.004838 (vs initial 0.008646)
-
-## Project Structure
-
-```
-src/
-├── main.rs          # CLI interface and pipeline
-├── hcp_grid.rs      # Hexagonal grid generation
-├── cvt.rs           # Lloyd's algorithm implementation
-├── dxf_output.rs    # DXF file writing
-└── svg_output.rs    # SVG visualization
+Debug optimization process:
+```bash
+./etch-hole-gen device.dxf --debug-svg iter_ --iterations 50
+# Generates iter_000.svg, iter_001.svg, ..., iter_050.svg
 ```
 
-## Technical Stack
+## Algorithm
 
-- **Language:** Rust 2021
-- **Key Dependencies:**
-  - `dxf` - DXF file I/O
-  - `geo` / `geo-types` - Geometric primitives
-  - `voronator` - Voronoi diagram computation
-  - `svg` - SVG export
+Initializes points on a hexagonal close-packed grid, then optimizes their positions using Lloyd's algorithm (iterative Voronoi relaxation). Convergence typically takes 20-50 iterations.
 
-## Limitations & Future Work
+Specifying a iso region can speed up convergence by as much as 2x on the right problem. Can sometimes cause some instability, YMMV.
 
-- [ ] Proper Voronoi cell clipping to boundary (currently simplified)
-- [ ] Boundary clearance enforcement (keep holes away from edges)
-- [ ] Parallel processing for large point sets
-- [ ] Interactive parameter tuning GUI
-- [ ] Support for multiple polygons (e.g., with interior holes)
+Written in Rust, therefore :fire: blazingly fast :fire:
 
-## References
+## Known Limitations
 
-- **Lloyd's Algorithm:** Lloyd, S.P. (1982). "Least squares quantization in PCM"
-- **CVT:** Du et al. (1999). "Centroidal Voronoi Tessellations"
+**Polygons with holes**: The tool can handle outlines with interior holes, but treats them as a single polygon with a connecting edge. This creates an irregularity in the hole pattern along this phantom boundary.
+
+**Large point counts**: For geometries that would generate >10M points, use `--override-point-limit` (expect long runtime).
+
+## Technical Details
+
+**Dependencies**: `dxf`, `geo`, `geo-types`, `voronator`, `svg`
+
+**Performance**: ~120,000 points optimize in ~19 seconds for 11 iterations, with iso region ~16 seconds for 15 iterations. 
+
+**Metrics**: Tracks Voronoi cell area variance (measures uniformity) and cell elongation (measures isotropy). Typical improvement: 40-70% variance reduction.
+
+## Roadmap
+
+Currently v1 is done and usable in production. I'd be open to expanding it with different seed grid types, different cutout shapes than holes, etc. But only if somebody actually needs it. So please open an issue if you do.
 
 ## License
 
 MIT
 
----
-
-**Application:** Nanomechanical resonators, MEMS devices, suspended membrane structures
-**Target:** Uniform material undercutting during fabrication
+Developed by Mark Kalsbeek at [TU Delft PME](https://www.tudelft.nl/me/over/afdelingen/precision-and-microsystems-engineering-pme).
