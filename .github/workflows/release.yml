@@ -8,32 +8,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: write
+
 jobs:
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version: ${{ steps.get_version.outputs.version }}
-    steps:
-      - name: Get version from tag
-        id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-
   build:
     name: Build ${{ matrix.target }}
-    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -81,9 +61,9 @@ jobs:
           cp target/${{ matrix.target }}/release/etch-hole-gen release/
           cp README.md LICENSE release/
           cd release
-          tar czf ../etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz *
+          tar czf ../etch-hole-gen-${{ matrix.target }}.tar.gz *
           cd ..
-          sha256sum etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz > etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz.sha256
+          sha256sum etch-hole-gen-${{ matrix.target }}.tar.gz > etch-hole-gen-${{ matrix.target }}.tar.gz.sha256
 
       - name: Create archive (Windows)
         if: matrix.archive == 'zip'
@@ -92,26 +72,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path release
           Copy-Item target/${{ matrix.target }}/release/etch-hole-gen.exe release/
           Copy-Item README.md, LICENSE release/
-          Compress-Archive -Path release/* -DestinationPath etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip
-          $hash = (Get-FileHash etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip" | Out-File -Encoding ASCII etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip.sha256
+          Compress-Archive -Path release/* -DestinationPath etch-hole-gen-${{ matrix.target }}.zip
+          $hash = (Get-FileHash etch-hole-gen-${{ matrix.target }}.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  etch-hole-gen-${{ matrix.target }}.zip" | Out-File -Encoding ASCII etch-hole-gen-${{ matrix.target }}.zip.sha256
 
-      - name: Upload Release Asset (Archive)
-        uses: actions/upload-release-asset@v1
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            *.tar.gz
+            *.zip
+            *.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
-          asset_name: etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
-          asset_content_type: application/octet-stream
-
-      - name: Upload Release Asset (Checksum)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}.sha256
-          asset_name: etch-hole-gen-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}.sha256
-          asset_content_type: text/plain
