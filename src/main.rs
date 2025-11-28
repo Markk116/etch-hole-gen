@@ -74,6 +74,10 @@ struct Args {
     #[arg(long)]
     debug_svg: Option<String>,
 
+    /// Debug mode: output OAS at each iteration with given prefix
+    #[arg(long)]
+    debug_oas: Option<String>,
+
     /// Include boundary outline in output
     #[arg(long)]
     include_outline: bool,
@@ -225,6 +229,7 @@ fn main() -> Result<()> {
         args.iterations,
         args.threshold,
         args.debug_svg.as_deref(),
+        args.debug_oas.as_deref(),
         start_time,
         &interrupted,
         maybe_iso_region,
@@ -258,6 +263,12 @@ fn main() -> Result<()> {
         svg_output::write_voronoi_svg(voronoi_path, &boundary, &optimized_points, scale)?;
         println!("      Voronoi SVG: {}", voronoi_path);
     }
+
+    // if let Some(ref voronoi_path) = args.voronoi_oas {
+    //     oasis_output::write_voronoi_oasis(voronoi_path, &boundary, &optimized_points)?;
+    //     println!("      Voronoi SVG: {}", voronoi_path);
+    // }
+
 
     // Optional GDS output
     if let Some(ref gds_path) = args.gds {

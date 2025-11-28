@@ -7,9 +7,10 @@ use voronator::VoronoiDiagram;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::Path;
 use std::time::Instant;
 use rayon::prelude::*;
-use crate::svg_output;
+use crate::{oasis_output, svg_output};
 
 /// Defines an isolation region where points are frozen during CVT optimization
 ///
@@ -69,6 +70,7 @@ pub struct CvtStats {
 /// - `max_iterations`: Maximum number of Lloyd iterations to perform
 /// - `convergence_threshold`: Stop when average point movement falls below this value (in meters)
 /// - `debug_svg_prefix`: Optional prefix for debug SVG output files
+/// - `debug_oas_prefix`: Optional prefix for debug OASIS output files
 /// - `start_time`: Start time for progress reporting
 /// - `interrupted`: Atomic flag to allow early termination
 /// - `isolation_region`: Optional region where points are frozen (not moved during optimization)
@@ -98,6 +100,7 @@ pub fn compute_cvt(
     max_iterations: usize,
     convergence_threshold: f64,
     debug_svg_prefix: Option<&str>,
+    debug_oas_prefix: Option<&str>,
     start_time: Instant,
     interrupted: &Arc<AtomicBool>,
     isolation_region: Option<IsolationRegion>,
@@ -106,6 +109,16 @@ pub fn compute_cvt(
     let mut variance_history = Vec::new();
     let mut final_elongation = 1.0;
     let mut iterations_run = 0;
+
+    let mut min_pt;
+    let mut max_pt;
+    (min_pt, max_pt) = compute_bounding_box(&boundary);
+    
+    min_pt.x*=1.1;
+    min_pt.y*=1.1;
+    max_pt.x*=1.1;
+    max_pt.y*=1.1;
+    
 
     // Create shrunk boundary if clearance is specified
     let working_boundary = if clearance > 0.0 {
@@ -184,7 +197,7 @@ pub fn compute_cvt(
         (points, Vec::new(), std::collections::HashSet::new())
     };
 
-    // Output initial state before optimization
+    // Output initial state before optimization (SVG)
     if let Some(prefix) = debug_svg_prefix {
         let debug_path = format!("{}_init.svg", prefix);
         let scale = 1e6;
@@ -211,6 +224,32 @@ pub fn compute_cvt(
             active,
         );
     }
+    
+    // Output initial state before optimization (OASIS)
+    if let Some(prefix) = debug_oas_prefix {
+        let debug_path = format!("{}_init.oas", prefix);
+        
+        let (iso_circle, iso_square, internal, rim, active) = if let Some((ref class, ref region)) = classification {
+            let (circle, square) = match region {
+                IsolationRegion::Circle { center, radius } => (Some((*center, *radius)), None),
+                IsolationRegion::Square { center, side_length } => (None, Some((*center, *side_length))),
+            };
+            (circle, square, class.internal.as_slice(), class.rim.as_slice(), class.active.as_slice())
+        } else {
+            (None, None, &[][..], &[][..], &[][..])
+        };
+        
+        let _ = oasis_output::write_voronoi_oasis(
+            Path::new(&debug_path),
+            boundary,
+            &working_points,
+            iso_circle,
+            iso_square,
+            internal,
+            rim,
+            active,
+        );
+    }
 
     for iter in 0..max_iterations {
         iterations_run = iter + 1;
@@ -220,8 +259,6 @@ pub fn compute_cvt(
             .iter()
             .map(|c| DelaunatorPoint { x: c.x, y: c.y })
             .collect();
-
-        let (min_pt, max_pt) = compute_bounding_box(&working_boundary);
 
         let diagram = match VoronoiDiagram::new(&min_pt, &max_pt, &voronoi_points) {
             Some(d) => d,
@@ -320,6 +357,32 @@ pub fn compute_cvt(
                 boundary,
                 &working_points,
                 scale,
+                iso_circle,
+                iso_square,
+                internal,
+                rim,
+                active,
+            );
+        }
+
+        // Debug OASIS output
+        if let Some(prefix) = debug_oas_prefix {
+            let debug_path = format!("{}_{:04}.oas", prefix, iter);
+            
+            let (iso_circle, iso_square, internal, rim, active) = if let Some((ref class, ref region)) = classification {
+                let (circle, square) = match region {
+                    IsolationRegion::Circle { center, radius } => (Some((*center, *radius)), None),
+                    IsolationRegion::Square { center, side_length } => (None, Some((*center, *side_length))),
+                };
+                (circle, square, class.internal.as_slice(), class.rim.as_slice(), class.active.as_slice())
+            } else {
+                (None, None, &[][..], &[][..], &[][..])
+            };
+            
+            let _ = oasis_output::write_voronoi_oasis(
+                Path::new(&debug_path),
+                boundary,
+                &working_points,
                 iso_circle,
                 iso_square,
                 internal,

@@ -50,7 +50,7 @@ pub fn write_svg(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", 2)
+        .set("stroke-width", 0.05)
         .set("d", path_data);
 
     document = document.add(boundary_path);
@@ -61,7 +61,7 @@ pub fn write_svg(
         .set("fill", "red")
         .set("fill-opacity", 0.5)
         .set("stroke", "red")
-        .set("stroke-width", 0.5);
+        .set("stroke-width", 0.1);
 
     for center in hole_centers {
         let cx = (center.x - min_x) * scale + margin;
@@ -128,7 +128,7 @@ pub fn write_voronoi_svg(
         let mut cells_group = Group::new()
             .set("fill", "none")
             .set("stroke", "blue")
-            .set("stroke-width", 0.5)
+            .set("stroke-width", 0.1)
             .set("stroke-opacity", 0.5);
 
         let all_cells = diagram.cells();
@@ -172,7 +172,7 @@ pub fn write_voronoi_svg(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", 2)
+        .set("stroke-width", 0.05)
         .set("d", path_data);
 
     document = document.add(boundary_path);
@@ -257,7 +257,7 @@ pub fn write_voronoi_svg_with_classification(
         let mut cells_group = Group::new()
             .set("fill", "none")
             .set("stroke", "blue")
-            .set("stroke-width", 0.5)
+            .set("stroke-width", 0.01)
             .set("stroke-opacity", 0.5);
 
         let all_cells = diagram.cells();
@@ -296,7 +296,7 @@ pub fn write_voronoi_svg_with_classification(
             .set("r", r)
             .set("fill", "none")
             .set("stroke", "purple")
-            .set("stroke-width", 2)
+            .set("stroke-width", 0.05)
             .set("stroke-dasharray", "5,5")
             .set("stroke-opacity", 0.7);
 
@@ -316,7 +316,7 @@ pub fn write_voronoi_svg_with_classification(
             .set("height", size)
             .set("fill", "none")
             .set("stroke", "purple")
-            .set("stroke-width", 2)
+            .set("stroke-width", 0.05)
             .set("stroke-dasharray", "5,5")
             .set("stroke-opacity", 0.7);
 
@@ -340,7 +340,7 @@ pub fn write_voronoi_svg_with_classification(
     let boundary_path = Path::new()
         .set("fill", "none")
         .set("stroke", "black")
-        .set("stroke-width", 2)
+        .set("stroke-width", 0.05)
         .set("d", path_data);
 
     document = document.add(boundary_path);
