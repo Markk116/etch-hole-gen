@@ -8,7 +8,9 @@ use std::path::Path;
 use voronator::delaunator::Point as DelaunatorPoint;
 use voronator::VoronoiDiagram;
 
-/// Meters to nanometers conversion (OASIS typically uses nm)
+/// Meters to nanometers conversion
+/// OASIS typically uses um, but you can specify the db unit in pixels per micron
+/// So we scale to NM so we don't alias away all our detail, and set our dbu to 1000
 const M_TO_NM: f64 = 1e9;
 
 /// Maximum segment length in meters (1 micron = 1e-6 meters)
@@ -34,6 +36,7 @@ pub fn write_oasis(
 ) -> Result<()> {
     // Create a new chip/layout
     let mut chip = Chip::new();
+    chip.set_dbu(1000);
 
     // Create top cell
     let top_cell = chip.create_cell("TOP".into());
@@ -112,6 +115,7 @@ pub fn write_voronoi_oasis(
 ) -> Result<()> {
     // Create a new chip/layout
     let mut chip = Chip::new();
+    chip.set_dbu(1000);
 
     // Create top cell
     let top_cell = chip.create_cell("TOP".into());
